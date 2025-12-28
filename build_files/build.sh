@@ -22,13 +22,18 @@ dnf -y copr enable ryanabx/cosmic-epoch
 dnf install -y cosmic-desktop
 dnf -y copr disable ryanabx/cosmic-epoch
 
-# Scroll via COPR installieren
-dnf -y copr enable scrollwm/packages
-dnf install -y scroll
-dnf -y copr disable scrollwm/packages
+# Scroll from source bauen und installieren
+dnf install -y meson ninja-build git lua-devel wayland-devel wayland-protocols-devel libdrm-devel libinput-devel libxkbcommon-devel pixman-devel mesa-libgbm-devel libseat-devel hwdata-devel systemd-devel json-c-devel pango-devel cairo-devel gobject-introspection-devel libdisplay-info-devel libliftoff-devel
+git clone https://github.com/dawsers/scroll.git /tmp/scroll
+cd /tmp/scroll
+meson setup build
+ninja -C build
+ninja -C build install
+cd -
+rm -rf /tmp/scroll
 
 # MangoWC via Terra Repository installieren
-dnf install --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
+dnf install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf install -y mangowc
 
 # DMS-Konfiguration für neue User
@@ -48,7 +53,7 @@ echo "exec-once = dms" >> /etc/skel/.config/cosmic/config.toml
 
 # Scroll-Config anpassen (DMS-Start, Kompatibilität prüfen)
 mkdir -p /etc/skel/.config/scroll
-echo "exec dms" >> /etc/skel/.config/scroll/config
+echo "exec = dms" >> /etc/skel/.config/scroll/config
 
 # MangoWC-Config anpassen (DMS-Start, Kompatibilität prüfen)
 mkdir -p /etc/skel/.config/mango
