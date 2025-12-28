@@ -9,8 +9,16 @@ set -ouex pipefail
 # List of rpmfusion packages can be found here:
 # https://mirrors.rpmfusion.org/mirrorlist?path=free/fedora/updates/39/x86_64/repoview/index.html&protocol=https&redirect=1
 
-# this installs a package from fedora repos
-dnf5 install -y tmux 
+# Hyprland via COPR installieren
+dnf5 -y copr enable solopasha/hyprland
+dnf5 install -y hyprland
+dnf5 -y copr disable solopasha/hyprland
+
+# Abhängigkeiten für DankMaterialShell installieren
+dnf5 install -y quickshell matugen pywal cava gojq yq ripgrep wl-clipboard cliphist
+
+# DankMaterialShell-Konfiguration für neue User vorinstallieren
+git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
 
 # Use a COPR Example:
 #
