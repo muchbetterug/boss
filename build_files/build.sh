@@ -10,15 +10,15 @@ set -ouex pipefail
 # https://mirrors.rpmfusion.org/mirrorlist?path=free/fedora/updates/39/x86_64/repoview/index.html&protocol=https&redirect=1
 
 # Niri via COPR installieren
-dnf5 -y copr enable yalter/niri
-dnf5 install -y niri
-dnf5 -y copr disable yalter/niri
+#dnf5 -y copr enable yalter/niri
+#dnf5 install -y niri
+#dnf5 -y copr disable yalter/niri
 
 # DankMaterialShell installieren
-curl -fsSL https://install.danklinux.com | bash
+#curl -fsSL https://install.danklinux.com | bash
 
 # DankMaterialShell-Konfiguration für neue User vorinstallieren
-git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
+#git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
 
 # Hyprland via COPR installieren
 #dnf5 -y copr enable solopasha/hyprland
