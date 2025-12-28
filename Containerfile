@@ -3,7 +3,7 @@ FROM scratch AS ctx
 COPY build_files /
 
 # Base Image
-FROM ghcr.io/ublue-os/bluefin-nvidia:stable
+FROM ghcr.io/ublue-os/bluefin-nvidia:stable-daily
 #FROM ghcr.io/ublue-os/bazzite:stable
 
 ## Other possible base images include:
