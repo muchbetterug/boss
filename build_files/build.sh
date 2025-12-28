@@ -17,47 +17,34 @@ dnf -y copr enable avengemedia/dms
 dnf install -y dms
 dnf -y copr disable avengemedia/dms
 
-# COSMIC via COPR installieren
-#dnf -y copr enable ryanabx/cosmic-epoch
-#dnf install -y cosmic-desktop
-#dnf -y copr disable ryanabx/cosmic-epoch
+# Dankinstall (für post-install Setup von DMS) – direkt aus GitHub Release
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64)  ARCH="amd64" ;;
+  aarch64) ARCH="arm64" ;;
+  *)       echo "Unsupported architecture: $ARCH" && exit 1 ;;
+esac
 
-# Scroll from source bauen und installieren
-#dnf install -y meson ninja-build git lua-devel wayland-devel wayland-protocols-devel libdrm-devel libinput-devel libxkbcommon-devel pixman-devel mesa-libgbm-devel libseat-devel hwdata-devel systemd-devel json-c-devel pango-devel cairo-devel gobject-introspection-devel libdisplay-info-devel libliftoff-devel
-#git clone https://github.com/dawsers/scroll.git /tmp/scroll
-#cd /tmp/scroll
-#meson setup build
-#ninja -C build
-#ninja -C build install
-#cd -
-#rm -rf /tmp/scroll
+LATEST_VERSION=$(curl -s https://api.github.com/repos/AvengeMedia/DankMaterialShell/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
-# MangoWC via Terra Repository installieren
-#dnf install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
-#dnf install -y mangowc
+curl -L "https://github.com/AvengeMedia/DankMaterialShell/releases/download/${LATEST_VERSION}/dankinstall-${ARCH}.gz" -o /usr/bin/dankinstall.gz
+gunzip /usr/bin/dankinstall.gz
+chmod +x /usr/bin/dankinstall
 
-# DMS-Konfiguration für neue User
+# DMS-Konfiguration für neue User (Skeleton)
 git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
 
-# Hyprland-Config anpassen (DMS-Start)
+# Hyprland: DMS automatisch starten
 mkdir -p /etc/skel/.config/hypr
-echo "exec-once = dms" >> /etc/skel/.config/hypr/hyprland.conf
+cat <<EOF > /etc/skel/.config/hypr/hyprland.conf
+exec-once = dms
+EOF
 
-# Niri-Config anpassen (DMS-Start)
+# Niri: DMS automatisch starten
 mkdir -p /etc/skel/.config/niri
-echo 'spawn "dms"' >> /etc/skel/.config/niri/config.kdl
+cat <<EOF > /etc/skel/.config/niri/config.kdl
+spawn "dms"
+EOF
 
-# COSMIC-Config anpassen (DMS-Start, Kompatibilität prüfen)
-#mkdir -p /etc/skel/.config/cosmic
-#echo "exec-once = dms" >> /etc/skel/.config/cosmic/config.toml
-
-# Scroll-Config anpassen (DMS-Start, Kompatibilität prüfen)
-#mkdir -p /etc/skel/.config/scroll
-#echo "exec = dms" >> /etc/skel/.config/scroll/config
-
-# MangoWC-Config anpassen (DMS-Start, Kompatibilität prüfen)
-#mkdir -p /etc/skel/.config/mango
-#echo "exec dms" >> /etc/skel/.config/mango/config
-
-# Beispiel: System Unit aktivieren
+# Podman Socket aktivieren
 systemctl enable podman.socket
