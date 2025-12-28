@@ -9,11 +9,16 @@ set -ouex pipefail
 # List of rpmfusion packages can be found here:
 # https://mirrors.rpmfusion.org/mirrorlist?path=free/fedora/updates/39/x86_64/repoview/index.html&protocol=https&redirect=1
 
-sudo dnf -y copr enable avengemedia/dms
-sudo dnf install niri dms
-sudo dnf -y copr disable avengemedia/dms
+dnf -y copr enable avengemedia/dms
+dnf install -y niri dms
+dnf -y copr disable avengemedia/dms
 
-systemctl --user add-wants niri.service dms
+# DMS-Konfiguration für neue User
+git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
+
+# Niri-Config anpassen (Beispiel für DMS-Start)
+mkdir -p /etc/skel/.config/niri
+echo 'spawn "dms"' >> /etc/skel/.config/niri/config.kdl
 
 
 # Niri via COPR installieren
