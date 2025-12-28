@@ -9,16 +9,27 @@ set -ouex pipefail
 # List of rpmfusion packages can be found here:
 # https://mirrors.rpmfusion.org/mirrorlist?path=free/fedora/updates/39/x86_64/repoview/index.html&protocol=https&redirect=1
 
-# Hyprland via COPR installieren
-dnf5 -y copr enable solopasha/hyprland
-dnf5 install -y hyprland
-dnf5 -y copr disable solopasha/hyprland
+# Niri via COPR installieren
+dnf5 -y copr enable yalter/niri
+dnf5 install -y niri
+dnf5 -y copr disable yalter/niri
 
-# Abhängigkeiten für DankMaterialShell installieren
-dnf5 install -y quickshell matugen pywal cava gojq yq ripgrep wl-clipboard cliphist
+# DankMaterialShell installieren
+curl -fsSL https://install.danklinux.com | bash
 
 # DankMaterialShell-Konfiguration für neue User vorinstallieren
 git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
+
+# Hyprland via COPR installieren
+#dnf5 -y copr enable solopasha/hyprland
+#dnf5 install -y hyprland
+#dnf5 -y copr disable solopasha/hyprland
+
+# Abhängigkeiten für DankMaterialShell installieren
+#dnf5 install -y quickshell matugen pywal cava gojq yq ripgrep wl-clipboard cliphist
+
+# DankMaterialShell-Konfiguration für neue User vorinstallieren
+#git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
 
 # Use a COPR Example:
 #
