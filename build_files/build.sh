@@ -2,54 +2,40 @@
 
 set -ouex pipefail
 
-### Install packages
+# Hyprland via COPR installieren
+dnf -y copr enable solopasha/hyprland
+dnf install -y hyprland
+dnf -y copr disable solopasha/hyprland
 
-# Packages can be installed from any enabled yum repo on the image.
-# RPMfusion repos are available by default in ublue main images
-# List of rpmfusion packages can be found here:
-# https://mirrors.rpmfusion.org/mirrorlist?path=free/fedora/updates/39/x86_64/repoview/index.html&protocol=https&redirect=1
+# Niri via COPR installieren
+dnf -y copr enable yalter/niri
+dnf install -y niri
+dnf -y copr disable yalter/niri
 
+# DMS installieren
 dnf -y copr enable avengemedia/dms
-dnf install -y niri dms
+dnf install -y dms
 dnf -y copr disable avengemedia/dms
+
+# COSMIC via COPR installieren
+dnf -y copr enable ryanabx/cosmic-epoch
+dnf install -y cosmic-desktop
+dnf -y copr disable ryanabx/cosmic-epoch
 
 # DMS-Konfiguration für neue User
 git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
 
-# Niri-Config anpassen (Beispiel für DMS-Start)
+# Hyprland-Config anpassen (DMS-Start)
+mkdir -p /etc/skel/.config/hypr
+echo "exec-once = dms" >> /etc/skel/.config/hypr/hyprland.conf
+
+# Niri-Config anpassen (DMS-Start)
 mkdir -p /etc/skel/.config/niri
 echo 'spawn "dms"' >> /etc/skel/.config/niri/config.kdl
 
+# COSMIC-Config anpassen (falls DMS kompatibel; ansonsten anpassen)
+mkdir -p /etc/skel/.config/cosmic
+echo "exec-once = dms" >> /etc/skel/.config/cosmic/config.toml  # DMS-Kompatibilität prüfen
 
-# Niri via COPR installieren
-#dnf5 -y copr enable yalter/niri
-#dnf5 install -y niri
-#dnf5 -y copr disable yalter/niri
-
-# DankMaterialShell installieren
-#curl -fsSL https://install.danklinux.com | bash
-
-# DankMaterialShell-Konfiguration für neue User vorinstallieren
-#git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
-
-# Hyprland via COPR installieren
-#dnf5 -y copr enable solopasha/hyprland
-#dnf5 install -y hyprland
-#dnf5 -y copr disable solopasha/hyprland
-
-# Abhängigkeiten für DankMaterialShell installieren
-#dnf5 install -y quickshell matugen pywal cava gojq yq ripgrep wl-clipboard cliphist
-
-# DankMaterialShell-Konfiguration für neue User vorinstallieren
-#git clone https://github.com/AvengeMedia/DankMaterialShell.git /etc/skel/.config/DankMaterialShell
-
-# Use a COPR Example:
-#
-# dnf5 -y copr enable ublue-os/staging
-# dnf5 -y install package
-# Disable COPRs so they don't end up enabled on the final image:
-# dnf5 -y copr disable ublue-os/staging
-
-#### Example for enabling a System Unit File
-
+# Beispiel: System Unit aktivieren
 systemctl enable podman.socket
