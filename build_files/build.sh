@@ -12,6 +12,11 @@ dnf -y copr enable yalter/niri
 dnf install -y niri
 dnf -y copr disable yalter/niri
 
+# Scroll via COPR installieren
+dnf -y copr enable scrollwm/packages
+dnf install -y scroll
+dnf -y copr disable scrollwm/packages
+
 # DMS installieren
 dnf -y copr enable avengemedia/dms
 dnf install -y dms
