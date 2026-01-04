@@ -11,3 +11,6 @@ systemctl --user add-wants niri.service dms
 
 # Podman Socket aktivieren
 systemctl enable podman.socket
+
+#change pretty name
+sed -i "s|^PRETTY_NAME=.*|PRETTY_NAME=\"boss\"|" /usr/lib/os-release
