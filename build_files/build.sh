@@ -9,7 +9,7 @@ dnf5 -y copr disable avengemedia/dms
 
 systemctl --user add-wants niri.service dms
 
-# Podman Socket aktivieren
+# Podman Socket aktvieren
 # systemctl enable podman.socket
 
 #change pretty name
