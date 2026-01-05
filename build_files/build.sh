@@ -7,7 +7,7 @@ dnf5 -y copr enable avengemedia/dms
 dnf5 install -y niri dms
 dnf5 -y copr disable avengemedia/dms
 
-systemctl --user add-wants niri.service dms
+#systemctl --user add-wants niri.service dms
 
 # Podman Socket aktvieren
 # systemctl enable podman.socket
