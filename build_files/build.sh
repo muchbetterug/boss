@@ -8,7 +8,7 @@ dnf5 -y copr disable avengemedia/dms
 
 # 2) Noctalia (Copr)
 dnf5 -y copr enable zhangyi6324/noctalia-shell
-# Falls der Copr es nicht als Dependency zieht, quickshell explizit mitinstallieren:
+# Falls der Copr es nicht als Dependency zieht, quickshell explizit mitinstallieren:s
 dnf5 -y install noctalia-shell quickshell || dnf5 -y install noctalia-shell
 dnf5 -y copr disable zhangyi6324/noctalia-shell
 
