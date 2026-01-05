@@ -17,12 +17,6 @@ dnf5 -y copr disable zhangyi6324/noctalia-shell
 install -d /etc/niri
 
 cat >/etc/niri/config.kdl <<'KDL'
-# Minimal: keine doppelte Bar (Default-config startet oft Waybar) :contentReference[oaicite:3]{index=3}
-
-# Starte DMS + Noctalia beim Session-Start.
-# (DMS besser so als per systemd-service, da es dort IPC-Probleme geben kann.) :contentReference[oaicite:4]{index=4}
-spawn-at-startup "noctalia-shell"
-
 include "./boss.kdl"
 KDL
 
@@ -45,4 +39,5 @@ layout {
 
 prefer-no-csd
 screenshot-path "~/Bilder/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
+spawn-at-startup "noctalia-shell"
 KDL
