@@ -16,6 +16,8 @@ dnf5 -y copr enable scottames/ghostty
 dnf5 -y install ghostty
 dnf5 -y copr disable scottames/ghostty
 
+dnf5 -y install kitty
+
 # 3) Niri systemweite Default-Config setzen:
 # Niri lädt config.kdl aus ~/.config/niri/… und fällt sonst auf /etc/niri/config.kdl zurück. :contentReference[oaicite:2]{index=2}
 #install -d /etc/niri
