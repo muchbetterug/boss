@@ -12,6 +12,10 @@ dnf5 -y copr enable zhangyi6324/noctalia-shell
 dnf5 -y install noctalia-shell quickshell || dnf5 -y install noctalia-shell
 dnf5 -y copr disable zhangyi6324/noctalia-shell
 
+dnf5 -y copr enable scottames/ghostty
+dnf5 install ghostty
+dnf5 -y copr disable scottames/ghostty
+
 # 3) Niri systemweite Default-Config setzen:
 # Niri lädt config.kdl aus ~/.config/niri/… und fällt sonst auf /etc/niri/config.kdl zurück. :contentReference[oaicite:2]{index=2}
 #install -d /etc/niri
