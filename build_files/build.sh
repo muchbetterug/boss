@@ -22,4 +22,27 @@ cat >/etc/niri/config.kdl <<'KDL'
 # Starte DMS + Noctalia beim Session-Start.
 # (DMS besser so als per systemd-service, da es dort IPC-Probleme geben kann.) :contentReference[oaicite:4]{index=4}
 spawn-at-startup "noctalia-shell"
+
+include "./boss.kdl"
+KDL
+
+cat >/etc/niri/boss.kdl <<'KDL'
+layout {
+    center-focused-column "always"
+    gaps 8
+
+    focus-ring {
+        off
+    }
+
+    preset-column-widths {
+        proportion 0.25
+        proportion 0.33333
+        proportion 0.5
+        proportion 0.66667
+    }
+}
+
+prefer-no-csd
+screenshot-path "~/Bilder/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 KDL
