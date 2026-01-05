@@ -14,30 +14,30 @@ dnf5 -y copr disable zhangyi6324/noctalia-shell
 
 # 3) Niri systemweite Default-Config setzen:
 # Niri lädt config.kdl aus ~/.config/niri/… und fällt sonst auf /etc/niri/config.kdl zurück. :contentReference[oaicite:2]{index=2}
-install -d /etc/niri
+#install -d /etc/niri
 
-cat >/etc/niri/config.kdl <<'KDL'
-include "./boss.kdl"
-KDL
+#cat >/etc/niri/config.kdl <<'KDL'
+#include "./boss.kdl"
+#KDL
 
-cat >/etc/niri/boss.kdl <<'KDL'
-layout {
-    center-focused-column "always"
-    gaps 8
+#cat >/etc/niri/boss.kdl <<'KDL'
+#layout {
+#    center-focused-column "always"
+#    gaps 8
 
-    focus-ring {
-        off
-    }
+#    focus-ring {
+#        off
+#    }
 
-    preset-column-widths {
-        proportion 0.25
-        proportion 0.33333
-        proportion 0.5
-        proportion 0.66667
-    }
-}
+#    preset-column-widths {
+#        proportion 0.25
+#        proportion 0.33333
+#        proportion 0.5
+#        proportion 0.66667
+#    }
+#}
 
-prefer-no-csd
-screenshot-path "~/Bilder/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
-spawn-at-startup "noctalia-shell"
-KDL
+#prefer-no-csd
+#screenshot-path "~/Bilder/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
+#spawn-at-startup "noctalia-shell"
+#KDL
