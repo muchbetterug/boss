@@ -11,7 +11,7 @@ dnf5 -y copr enable zhangyi6324/noctalia-shell
 dnf5 -y install noctalia-shell
 dnf5 -y copr disable zhangyi6324/noctalia-shell
 
-noctalia-shell
+#noctalia-shell
 
 #systemctl --user add-wants niri.service dms
 
