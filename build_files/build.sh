@@ -60,9 +60,6 @@ dnf_install kitty qt6ct
 # Build dependencies (broad enough for wlroots/scenefx/mangowc)
 ###############################################################################
 log "Install build dependencies"
-
-dnf5 -y install \
-
 dnf_install \
   gcc gcc-c++ \
   meson ninja-build \
