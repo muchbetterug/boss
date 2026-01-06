@@ -214,11 +214,7 @@ build_wlroots_master_with_wrapfallback() {
   local saved_cflags="${CFLAGS:-}"
   local saved_cxxflags="${CXXFLAGS:-}"
 
-  export CFLAGS="${saved_cflags} \
-    -Wno-error=packed \
-    -Wno-error=calloc-transposed-args \
-    -Wno-error=array-bounds \
-    -Wno-error=stringop-overflow"
+  export CFLAGS="${saved_cflags} -Wno-error"
   export CXXFLAGS="${saved_cxxflags}"
 
   meson setup build \
