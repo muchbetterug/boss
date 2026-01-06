@@ -205,11 +205,20 @@ build_wlroots_release() {
 
 build_wlroots_master_with_wrapfallback() {
   log "Build wlroots (master) with Meson wrap fallback (for newer deps like libdrm>=2.4.129)"
+
   rm -rf wlroots
   git clone --depth 1 https://gitlab.freedesktop.org/wlroots/wlroots.git wlroots
   cd wlroots
 
-  # This is the key: allow Meson to download/build wrap subprojects if needed.
+  # GCC 15 trips Werror in libdrm wrap (packed + calloc-transposed-args).
+  # Keep this scoped to the wlroots+wrap build only.
+  local saved_cflags="${CFLAGS:-}"
+  local saved_cxxflags="${CXXFLAGS:-}"
+
+  export CFLAGS="${saved_cflags} -Wno-error=packed -Wno-error=calloc-transposed-args"
+  export CXXFLAGS="${saved_cxxflags}"
+
+  # Allow Meson to fetch/build wrap subprojects if needed
   meson setup build \
     -Dprefix=/usr \
     -Dbuildtype=release \
@@ -219,6 +228,11 @@ build_wlroots_master_with_wrapfallback() {
   ninja -C build
   $SUDO ninja -C build install
   $SUDO ldconfig
+
+  # restore flags
+  export CFLAGS="${saved_cflags}"
+  export CXXFLAGS="${saved_cxxflags}"
+
   cd "${BUILDROOT}"
 }
 
