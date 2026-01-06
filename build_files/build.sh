@@ -19,9 +19,17 @@ dnf5 -y copr disable scottames/ghostty
 dnf5 -y install kitty
 dnf5 -y install qt6ct # für icons
 
-dnf5 -y install --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
-dnf5 -y update
-dnf5 -y install mangowc
+# Fedora-Version ermitteln
+FEDORA_VERSION=$(rpm -E %fedora)
+
+# Terra-Release-Paket herunterladen und installieren
+sudo dnf install -y https://repos.fyralabs.com/terra${FEDORA_VERSION}/terra-release-${FEDORA_VERSION}-1.noarch.rpm
+
+# Repository aktualisieren
+sudo dnf update -y
+
+# MangoWC installieren
+sudo dnf install -y mangowc
 
 # 3) Niri systemweite Default-Config setzen:
 # Niri lädt config.kdl aus ~/.config/niri/… und fällt sonst auf /etc/niri/config.kdl zurück. :contentReference[oaicite:2]{index=2}
