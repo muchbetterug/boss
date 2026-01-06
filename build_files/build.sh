@@ -20,6 +20,7 @@ dnf5 -y install kitty
 dnf5 -y install qt6ct # für icons
 
 dnf5 -y install --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
+dnf5 -y update
 dnf5 -y install mangowc
 
 # 3) Niri systemweite Default-Config setzen:
