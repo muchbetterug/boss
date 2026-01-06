@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+sudo dnf5 -y clean all
+sudo dnf5 -y --refresh upgrade || true
+
+# falls vorhanden: kaputtes repo abschalten
+sudo dnf5 config-manager setopt updates-archive.enabled=0 || true
+
+sudo dnf5 -y makecache
+
 # Bluefin build script helper
 log() { echo -e "\n==> $*"; }
 
