@@ -5,10 +5,8 @@ set -euo pipefail
 log() { echo -e "\n==> $*"; }
 
 FEDORA_VERSION="$(rpm -E %fedora)"
-TERRA_URL="https://repos.fyralabs.com/terra${FEDORA_VERSION}"
 
 log "Fedora: ${FEDORA_VERSION}"
-log "Terra URL: ${TERRA_URL}"
 
 # 1) Niri + DMS (Copr)
 log "Enable COPR avengemedia/dms"
@@ -31,27 +29,76 @@ dnf5 -y copr disable scottames/ghostty
 # 4) Extras
 dnf5 -y install kitty qt6ct
 
-# 5) Terra repo (terra-release)
-log "Install terra-release via repofrompath (no \$releasever pitfalls)"
-dnf5 -y install --nogpgcheck --repofrompath "terra,${TERRA_URL}" terra-release
+# 0) Build deps installieren
+# (Liste ist bewusst etwas "breiter", damit Meson nicht mitten im Build wegen fehlender -devel Pakete abbricht.)
+dnf5 -y install \
+  git \
+  gcc gcc-c++ \
+  meson ninja-build \
+  pkgconf-pkg-config \
+  wayland-devel wayland-protocols-devel \
+  libxkbcommon-devel \
+  pixman-devel \
+  libdrm-devel \
+  mesa-libEGL-devel mesa-libGLES-devel mesa-libgbm-devel \
+  libinput-devel \
+  seatd-devel \
+  systemd-devel \
+  xorg-x11-server-Xwayland \
+  libxcb-devel xcb-util-devel xcb-util-wm-devel xcb-util-renderutil-devel xcb-util-image-devel xcb-util-keysyms-devel \
+  cairo-devel pango-devel \
+  glib2-devel \
+  hwdata
 
-log "Refresh metadata"
+# 1) Build wlroots (pinned)
+# Doku: git clone -b 0.19.2 ... meson build -Dprefix=/usr ... ninja install :contentReference[oaicite:3]{index=3}
+rm -rf /tmp/mangowc-build
+mkdir -p /tmp/mangowc-build
+cd /tmp/mangowc-build
+
+git clone -b 0.19.2 --depth 1 https://gitlab.freedesktop.org/wlroots/wlroots.git
+cd wlroots
+meson setup build -Dprefix=/usr -Dbuildtype=release
+ninja -C build install
+cd ..
+
+# 2) Build scenefx (pinned)
+# Doku: git clone -b 0.4.1 ... meson build -Dprefix=/usr ... ninja install :contentReference[oaicite:4]{index=4}
+git clone -b 0.4.1 --depth 1 https://github.com/wlrfx/scenefx.git
+cd scenefx
+meson setup build -Dprefix=/usr -Dbuildtype=release
+ninja -C build install
+cd ..
+
+# 3) Build MangoWC
+# Doku: "Finally, compile the compositor itself." (Meson/Ninja analog) :contentReference[oaicite:5]{index=5}
+git clone --depth 1 https://github.com/DreamMaoMao/mangowc.git
+cd mangowc
+meson setup build -Dprefix=/usr -Dbuildtype=release
+ninja -C build install
+
+# 4) Cleanup: Build-Verzeichnis entfernen
+cd /
+rm -rf /tmp/mangowc-build
+
+# Optional: Build deps entfernen, um Image klein zu halten
+# (Wenn du später im Build noch mehr kompilierst, dann erst ganz am Ende entfernen.)
+dnf5 -y remove \
+  git \
+  gcc gcc-c++ \
+  meson ninja-build \
+  pkgconf-pkg-config \
+  wayland-devel wayland-protocols-devel \
+  libxkbcommon-devel \
+  pixman-devel \
+  libdrm-devel \
+  mesa-libEGL-devel mesa-libGLES-devel mesa-libgbm-devel \
+  libinput-devel \
+  seatd-devel \
+  systemd-devel \
+  libxcb-devel xcb-util-devel xcb-util-wm-devel xcb-util-renderutil-devel xcb-util-image-devel xcb-util-keysyms-devel \
+  cairo-devel pango-devel \
+  glib2-devel \
+  hwdata || true
+
 dnf5 -y clean all
-dnf5 -y makecache
-
-# 6) Check if mangowc exists
-log "Check availability of mangowc"
-if ! dnf5 -q repoquery mangowc >/dev/null 2>&1; then
-  echo
-  echo "ERROR: 'mangowc' is not available for Fedora ${FEDORA_VERSION} in the enabled repos."
-  echo "       This matches that Terra${FEDORA_VERSION} does not appear to ship mangowc currently."
-  echo
-  echo "Options:"
-  echo "  1) Build MangoWC from source (official docs include wlroots+scenefx pins)."
-  echo "  2) Use a COPR that provides MangoWC (quality varies)."
-  echo "  3) Use a Fedora version / image where the package is available."
-  exit 1
-fi
-
-log "Install mangowc"
-dnf5 -y install mangowc
