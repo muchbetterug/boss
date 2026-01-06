@@ -60,8 +60,10 @@ dnf_install kitty qt6ct
 # Build dependencies (broad enough for wlroots/scenefx/mangowc)
 ###############################################################################
 log "Install build dependencies"
+
+dnf5 -y install \
+
 dnf_install \
-  git \
   gcc gcc-c++ \
   meson ninja-build \
   pkgconf-pkg-config \
@@ -73,6 +75,9 @@ dnf_install \
   libinput-devel \
   libseat-devel \
   systemd-devel \
+  libdisplay-info-devel \
+  libliftoff-devel \
+  git \
   xorg-x11-server-Xwayland \
   libxcb-devel xcb-util-devel xcb-util-wm-devel xcb-util-renderutil-devel xcb-util-image-devel xcb-util-keysyms-devel \
   cairo-devel pango-devel \
