@@ -1,45 +1,66 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-sudo dnf5 -y clean all
-sudo dnf5 -y --refresh upgrade || true
+###############################################################################
+# setup.sh — Build & install MangoWC inside a Bluefin/uBlue container
+#
+# Goals:
+# - Fully non-interactive (no prompts)
+# - Work around broken "updates-archive" repo (404) seen in some Bluefin images
+# - Build pinned wlroots + scenefx + mangowc into /usr
+# - Optionally remove build deps at end to keep the image small
+###############################################################################
 
-# falls vorhanden: kaputtes repo abschalten
-sudo dnf5 config-manager setopt updates-archive.enabled=0 || true
-
-sudo dnf5 -y makecache
-
-# Bluefin build script helper
+# ---------- helpers ----------
 log() { echo -e "\n==> $*"; }
 
+# In many container builds you are root already; keep sudo optional.
+SUDO=""
+if [[ "$(id -u)" -ne 0 ]]; then
+  SUDO="sudo"
+fi
+
+# Hard-disable any git prompts (in case something misconfigured tries to prompt)
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=true
+
+# Some uBlue/Bluefin layers have a broken repo "updates-archive" that 404s.
+disable_updates_archive_repo() {
+  if grep -Rqs "^\[updates-archive\]" /etc/yum.repos.d; then
+    log "Disabling broken repo: updates-archive"
+    # Only change inside the [updates-archive] section
+    $SUDO sed -i '/^\[updates-archive\]/,/^\[/{s/^\(enabled\s*=\s*\)1/\10/}' /etc/yum.repos.d/*.repo || true
+  fi
+}
+
+# Wrapper to always avoid updates-archive (belt & suspenders).
+dnf_install() { $SUDO dnf5 -y --disablerepo=updates-archive install "$@"; }
+dnf_remove()  { $SUDO dnf5 -y --disablerepo=updates-archive remove  "$@"; }
+dnf_upgrade() { $SUDO dnf5 -y --disablerepo=updates-archive --refresh upgrade || true; }
+dnf_makecache(){ $SUDO dnf5 -y --disablerepo=updates-archive makecache || true; }
+
+# ---------- start ----------
+disable_updates_archive_repo
+
+log "DNF cleanup/refresh"
+$SUDO dnf5 -y clean all || true
+dnf_upgrade
+dnf_makecache
+
 FEDORA_VERSION="$(rpm -E %fedora)"
+log "Fedora release: ${FEDORA_VERSION}"
 
-log "Fedora: ${FEDORA_VERSION}"
+###############################################################################
+# Optional extras (keep if you want them in the image)
+###############################################################################
+log "Install extras (kitty + qt6ct)"
+dnf_install kitty qt6ct
 
-# 1) Niri + DMS (Copr)
-log "Enable COPR avengemedia/dms"
-dnf5 -y copr enable avengemedia/dms
-dnf5 -y install niri dms
-dnf5 -y copr disable avengemedia/dms
-
-# 2) Noctalia (Copr)
-log "Enable COPR zhangyi6324/noctalia-shell"
-dnf5 -y copr enable zhangyi6324/noctalia-shell
-dnf5 -y install noctalia-shell quickshell || dnf5 -y install noctalia-shell
-dnf5 -y copr disable zhangyi6324/noctalia-shell
-
-# 3) Ghostty (Copr)
-log "Enable COPR scottames/ghostty"
-dnf5 -y copr enable scottames/ghostty
-dnf5 -y install ghostty
-dnf5 -y copr disable scottames/ghostty
-
-# 4) Extras
-dnf5 -y install kitty qt6ct
-
-# 0) Build deps installieren
-# (Liste ist bewusst etwas "breiter", damit Meson nicht mitten im Build wegen fehlender -devel Pakete abbricht.)
-dnf5 -y install \
+###############################################################################
+# Build dependencies (broad enough for wlroots/scenefx/mangowc)
+###############################################################################
+log "Install build dependencies"
+dnf_install \
   git \
   gcc gcc-c++ \
   meson ninja-build \
@@ -48,7 +69,7 @@ dnf5 -y install \
   libxkbcommon-devel \
   pixman-devel \
   libdrm-devel \
-  mesa-libEGL-devel mesa-libGLES-devel mesa-libgbm-devel \
+  mesa-libEGL-devel mesa-libgbm-devel \
   libinput-devel \
   libseat-devel \
   systemd-devel \
@@ -58,40 +79,65 @@ dnf5 -y install \
   glib2-devel \
   hwdata
 
-# 1) Build wlroots (pinned)
-# Doku: git clone -b 0.19.2 ... meson build -Dprefix=/usr ... ninja install :contentReference[oaicite:3]{index=3}
-rm -rf /tmp/mangowc-build
-mkdir -p /tmp/mangowc-build
-cd /tmp/mangowc-build
+# Some Fedora variants split/rename GLES devel; try best-effort without failing the whole build.
+dnf_install mesa-libGLES-devel || true
 
-git clone -b 0.19.2 --depth 1 https://gitlab.freedesktop.org/wlroots/wlroots.git
+###############################################################################
+# Build & install pinned wlroots + scenefx + mangowc
+###############################################################################
+BUILDROOT="/tmp/mangowc-build"
+log "Prepare build root: ${BUILDROOT}"
+$SUDO rm -rf "${BUILDROOT}"
+$SUDO mkdir -p "${BUILDROOT}"
+cd "${BUILDROOT}"
+
+# 1) wlroots (pinned)
+WLROOTS_TAG="0.19.2"
+log "Clone wlroots ${WLROOTS_TAG}"
+git clone -b "${WLROOTS_TAG}" --depth 1 https://gitlab.freedesktop.org/wlroots/wlroots.git
 cd wlroots
+log "Build & install wlroots ${WLROOTS_TAG}"
 meson setup build -Dprefix=/usr -Dbuildtype=release
-ninja -C build install
-cd ..
+ninja -C build
+$SUDO ninja -C build install
+$SUDO ldconfig
+cd "${BUILDROOT}"
 
-# 2) Build scenefx (pinned)
-# Doku: git clone -b 0.4.1 ... meson build -Dprefix=/usr ... ninja install :contentReference[oaicite:4]{index=4}
-git clone -b 0.4.1 --depth 1 https://github.com/wlrfx/scenefx.git
+# 2) scenefx (pinned)
+SCENEFX_TAG="0.4.1"
+log "Clone scenefx ${SCENEFX_TAG}"
+git clone -b "${SCENEFX_TAG}" --depth 1 https://github.com/wlrfx/scenefx.git
 cd scenefx
+log "Build & install scenefx ${SCENEFX_TAG}"
 meson setup build -Dprefix=/usr -Dbuildtype=release
-ninja -C build install
-cd ..
+ninja -C build
+$SUDO ninja -C build install
+$SUDO ldconfig
+cd "${BUILDROOT}"
 
-# 3) Build MangoWC
-# Doku: "Finally, compile the compositor itself." (Meson/Ninja analog) :contentReference[oaicite:5]{index=5}
+# 3) MangoWC
+log "Clone mangowc"
 git clone --depth 1 https://github.com/DreamMaoMao/mangowc.git
 cd mangowc
+log "Build & install mangowc"
 meson setup build -Dprefix=/usr -Dbuildtype=release
-ninja -C build install
+ninja -C build
+$SUDO ninja -C build install
+$SUDO ldconfig
 
-# 4) Cleanup: Build-Verzeichnis entfernen
+###############################################################################
+# Cleanup build directory
+###############################################################################
+log "Cleanup build directory"
 cd /
-rm -rf /tmp/mangowc-build
+$SUDO rm -rf "${BUILDROOT}"
 
-# Optional: Build deps entfernen, um Image klein zu halten
-# (Wenn du später im Build noch mehr kompilierst, dann erst ganz am Ende entfernen.)
-dnf5 -y remove \
+###############################################################################
+# Optional: remove build deps to reduce image size
+# If you plan to compile more things later, move this block to the very end.
+###############################################################################
+log "Remove build dependencies (optional image slimming)"
+dnf_remove \
   git \
   gcc gcc-c++ \
   meson ninja-build \
@@ -100,13 +146,28 @@ dnf5 -y remove \
   libxkbcommon-devel \
   pixman-devel \
   libdrm-devel \
-  mesa-libEGL-devel mesa-libGLES-devel mesa-libgbm-devel \
+  mesa-libEGL-devel mesa-libgbm-devel \
   libinput-devel \
-  libseatd-devel \
+  libseat-devel \
   systemd-devel \
   libxcb-devel xcb-util-devel xcb-util-wm-devel xcb-util-renderutil-devel xcb-util-image-devel xcb-util-keysyms-devel \
   cairo-devel pango-devel \
   glib2-devel \
-  hwdata || true
+  hwdata \
+  || true
 
-dnf5 -y clean all
+# Best-effort remove of optional GLES devel if installed
+dnf_remove mesa-libGLES-devel || true
+
+# Autoremove leftover deps (best-effort)
+$SUDO dnf5 -y --disablerepo=updates-archive autoremove || true
+$SUDO dnf5 -y clean all || true
+
+log "Done. MangoWC should be installed in /usr/bin/mangowc"
+
+
+# 2) Noctalia (Copr)
+log "Enable COPR zhangyi6324/noctalia-shell"
+dnf5 -y copr enable zhangyi6324/noctalia-shell
+dnf5 -y install noctalia-shell quickshell || dnf5 -y install noctalia-shell
+dnf5 -y copr disable zhangyi6324/noctalia-shell
