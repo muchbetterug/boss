@@ -210,15 +210,17 @@ build_wlroots_master_with_wrapfallback() {
   git clone --depth 1 https://gitlab.freedesktop.org/wlroots/wlroots.git wlroots
   cd wlroots
 
-  # GCC 15 trips Werror in libdrm wrap (packed + calloc-transposed-args).
-  # Keep this scoped to the wlroots+wrap build only.
+  # GCC 15 hits Werror in libdrm wrap. Keep this scoped to this build only.
   local saved_cflags="${CFLAGS:-}"
   local saved_cxxflags="${CXXFLAGS:-}"
 
-  export CFLAGS="${saved_cflags} -Wno-error=packed -Wno-error=calloc-transposed-args"
+  export CFLAGS="${saved_cflags} \
+    -Wno-error=packed \
+    -Wno-error=calloc-transposed-args \
+    -Wno-error=array-bounds \
+    -Wno-error=stringop-overflow"
   export CXXFLAGS="${saved_cxxflags}"
 
-  # Allow Meson to fetch/build wrap subprojects if needed
   meson setup build \
     -Dprefix=/usr \
     -Dbuildtype=release \
@@ -229,7 +231,6 @@ build_wlroots_master_with_wrapfallback() {
   $SUDO ninja -C build install
   $SUDO ldconfig
 
-  # restore flags
   export CFLAGS="${saved_cflags}"
   export CXXFLAGS="${saved_cxxflags}"
 
