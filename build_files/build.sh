@@ -175,7 +175,7 @@ BUILD_DEPS=(
   cpio
   ninja
   python3
-
+  aquamarine-devel
   wayland-devel
   wayland-protocols-devel
 
