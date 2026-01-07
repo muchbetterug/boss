@@ -216,6 +216,16 @@ for repo in "${COPR_REPOS[@]}"; do
 	dnf5 -y copr disable "$repo"
 done
 
+# -----------------------------
+# Noctalia Shell (+ quickshell) via COPR
+# -----------------------------
+log "Enable COPR: zhangyi6324/noctalia-shell"
+dnf5 -y copr enable zhangyi6324/noctalia-shell
+
+log "Install Noctalia Shell + quickshell"
+dnf5 --setopt=install_weak_deps=False -y install noctalia-shell quickshell
+dnf5 -y copr disable zhangyi6324/noctalia-shell
+
 #######################################################################
 ### Enable Services
 
