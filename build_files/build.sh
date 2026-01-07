@@ -38,7 +38,7 @@ $SUDO "${DNF[@]}" install \
   grim slurp \
   swaylock \
   xdg-user-dirs \
-  adwaita-icon-theme xcursor-themes
+  adwaita-icon-theme
 
 # --- Noctalia Shell ---
 log "Enable COPR: zhangyi6324/noctalia-shell"
