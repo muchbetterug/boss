@@ -57,6 +57,7 @@ ADDITIONAL_SYSTEM_APPS=(
   alacritty
   kitty
   kitty-terminfo
+  rofi
   thunar
   thunar-volman
   thunar-archive-plugin
