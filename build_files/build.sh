@@ -162,8 +162,6 @@ BUILD_DEPS=(
   libxcb-devel
   libXi-devel
 
-  xwayland-devel
-
   mesa-libGL-devel
   mesa-libEGL-devel
   mesa-libgbm-devel
