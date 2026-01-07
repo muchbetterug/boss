@@ -143,9 +143,11 @@ ADDITIONAL_SYSTEM_APPS=(
 
 # Build deps for Hyprland/Hyprpm compilation (incl. NVIDIA)
 BUILD_DEPS=(
-  gcc gcc-c++
-  clang llvm
-  cmake meson
+  gcc
+  clang
+  llvm
+  cmake
+  meson
   pkg-config
   git
   cpio
