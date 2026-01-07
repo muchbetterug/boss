@@ -222,7 +222,6 @@ dnf5 -y --setopt=install_weak_deps=False install \
   libXcursor-devel \
   libXrandr-devel \
   libXinerama-devel \
-  xwayland-devel \
   libX11-devel \
   libxcb-devel \
   libXi-devel \
