@@ -35,17 +35,20 @@ $SUDO "${DNF[@]}" install dnf5-plugins
 # -----------------------------
 log "Install Hyprland + portals + essentials"
 $SUDO "${DNF[@]}" install \
-  cmake \
-  meson \
-  cpio \
-  hyprland \
-  xdg-desktop-portal-hyprland \
-  foot rofi \
-  wl-clipboard \
-  grim slurp \
-  swaylock \
-  xdg-user-dirs \
-  adwaita-icon-theme
+gcc-c++ \
+ninja-build \
+make \
+cmake \
+meson \
+cpio \
+hyprland \
+xdg-desktop-portal-hyprland \
+foot rofi \
+wl-clipboard \
+grim slurp \
+swaylock \
+xdg-user-dirs \
+adwaita-icon-theme
 
 # Optional niceties (do not fail build if unavailable)
 $SUDO "${DNF[@]}" install \
