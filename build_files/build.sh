@@ -121,6 +121,8 @@ HYPR_PKGS=(
   hyprshot
   hyprsunset
   hyprutils
+  hyperlang
+  hyprland-devel
   xdg-desktop-portal-hyprland
 )
 
