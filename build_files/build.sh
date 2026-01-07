@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Bluefin/uBlue: Hyprland + hyprscroller (PaperWM-like, mouse-first)
-# Noctalia Shell as full shell on top of Hyprland
-# GDM is used (default Bluefin)
+# setup.sh — Bluefin/uBlue (Fedora): Hyprland + hyprscroller (PaperWM-like) + Noctalia Shell (+ quickshell)
+# Notes for Bluefin images:
+# - Avoid writing to /usr/local (can be special/immutable); use /usr/bin or /usr/libexec instead.
+# - hyprscroller is installed per-user via hyprpm at first Hyprland start (needs network once).
+# - Seed Noctalia config into /etc/skel so new users get "full shell" OOTB.
 
 log() { echo -e "\n==> $*"; }
 
@@ -12,7 +14,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
   SUDO="sudo"
 fi
 
-# Disable broken updates-archive repo if present
+# Bluefin/uBlue: sometimes "updates-archive" repo is broken (404). Disable it hard (harmless if not present).
 if grep -Rqs "^\[updates-archive\]" /etc/yum.repos.d; then
   log "Disable broken repo: updates-archive"
   $SUDO sed -i '/^\[updates-archive\]/,/^\[/{s/^\(enabled\s*=\s*\)1/\10/}' /etc/yum.repos.d/*.repo
@@ -25,11 +27,13 @@ $SUDO "${DNF[@]}" clean all
 $SUDO "${DNF[@]}" --refresh upgrade || true
 $SUDO "${DNF[@]}" makecache
 
-log "Install COPR plugin"
+log "Install COPR plugin (dnf5-plugins)"
 $SUDO "${DNF[@]}" install dnf5-plugins
 
-# --- Hyprland core ---
-log "Install Hyprland + portals"
+# -----------------------------
+# Hyprland + essentials
+# -----------------------------
+log "Install Hyprland + portals + essentials"
 $SUDO "${DNF[@]}" install \
   hyprland \
   xdg-desktop-portal-hyprland \
@@ -40,45 +44,79 @@ $SUDO "${DNF[@]}" install \
   xdg-user-dirs \
   adwaita-icon-theme
 
-# --- Noctalia Shell ---
+# Optional niceties (do not fail build if unavailable)
+$SUDO "${DNF[@]}" install \
+  wayland-utils \
+  xorg-x11-xauth \
+  || true
+
+# -----------------------------
+# Noctalia Shell (+ quickshell) via COPR
+# -----------------------------
 log "Enable COPR: zhangyi6324/noctalia-shell"
 $SUDO "${DNF[@]}" copr enable zhangyi6324/noctalia-shell
 
 log "Install Noctalia Shell + quickshell"
 $SUDO "${DNF[@]}" install noctalia-shell quickshell
 
-# --- hyprscroller bootstrap (per-user via hyprpm) ---
-log "Install hyprscroller bootstrap helper"
-$SUDO install -Dm0755 /dev/stdin /usr/local/bin/hyprscroller-bootstrap <<'EOF'
+# -----------------------------
+# Polkit agent (reliable with Hyprland)
+# -----------------------------
+# Noctalia COPR already pulled polkit-kde in your logs, but we ensure it exists.
+log "Install polkit agent (polkit-kde)"
+$SUDO "${DNF[@]}" install polkit-kde
+
+# -----------------------------
+# hyprscroller bootstrap helper (per-user via hyprpm)
+# DO NOT use /usr/local on Bluefin images
+# -----------------------------
+log "Install hyprscroller bootstrap helper (/usr/bin)"
+$SUDO install -Dm0755 /dev/stdin /usr/bin/hyprscroller-bootstrap <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Runs inside a Hyprland session (exec-once).
+# Installs & enables hyprscroller via hyprpm if missing, then reloads plugins.
+
 command -v hyprpm >/dev/null 2>&1 || exit 0
 
-if hyprpm list | grep -qi hyprscroller; then
+# Already installed?
+if hyprpm list 2>/dev/null | grep -qi hyprscroller; then
   hyprpm reload -n || true
   exit 0
 fi
 
+# PaperWM-like scrolling layout plugin
 hyprpm add https://github.com/dawsers/hyprscroller
 hyprpm enable hyprscroller
 hyprpm reload -n || true
 EOF
 
-# --- Default Hyprland config (PaperWM mouse workflow) ---
-log "Write /etc/skel Hyprland config (PaperWM-style, mouse-first)"
+# -----------------------------
+# Seed Noctalia config into /etc/skel so new users get full shell OOTB
+# (Noctalia itself recommends: noctalia-shell --copy)
+# We "fake" HOME=/etc/skel during build. If it fails in container, don't break the build.
+# -----------------------------
+log "Seed Noctalia config into /etc/skel (best-effort)"
+$SUDO install -d /etc/skel/.config
+$SUDO env HOME=/etc/skel noctalia-shell --copy --force || true
+
+# -----------------------------
+# Default Hyprland config (PaperWM mouse-centric)
+# -----------------------------
+log "Write /etc/skel Hyprland config (PaperWM-style, mouse-first, Noctalia full shell)"
 $SUDO install -d /etc/skel/.config/hypr
 
 $SUDO install -Dm0644 /dev/stdin /etc/skel/.config/hypr/hyprland.conf <<'EOF'
 # ======================================================
-# Hyprland + hyprscroller
-# PaperWM-like layout (mouse-centric desktop workflow)
-# Noctalia = full shell
+# Hyprland + hyprscroller (PaperWM-like)
+# Desktop / mouse-centric workflow
+# Noctalia Shell as full shell
 # ======================================================
 
 $mainMod = SUPER
 
-# --- IMPORTANT: disable native swipe, scroller replaces it ---
+# If Hyprland's swipe is on, it can conflict with scroller behavior.
 gestures {
   workspace_swipe = off
 }
@@ -98,22 +136,38 @@ input {
   follow_mouse = 1
 }
 
-# --- Start shell ---
-exec-once = noctalia-shell
-exec-once = /usr/local/bin/hyprscroller-bootstrap
+# ------------------------------------------------------
+# Startup: Polkit + Noctalia + hyprscroller bootstrap
+# ------------------------------------------------------
 
-# Keep active column centered (PaperWM core behavior)
+# Polkit agent (choose the first existing path)
+exec-once = sh -lc 'for a in \
+  /usr/libexec/polkit-kde-authentication-agent-1 \
+  /usr/lib/polkit-kde-authentication-agent-1 \
+  /usr/libexec/lxqt-policykit-agent; do \
+    [ -x "$a" ] && exec "$a"; \
+  done'
+
+# Noctalia full shell
+exec-once = noctalia-shell
+
+# Install/enable hyprscroller per-user (hyprpm is per-home)
+exec-once = /usr/bin/hyprscroller-bootstrap
+
+# Center active column (PaperWM core feel)
 exec-once = hyprctl dispatch scroller:setmode center_column
 
-# --- Apps ---
+# ------------------------------------------------------
+# Apps / basics
+# ------------------------------------------------------
 bind = $mainMod, Return, exec, foot
 bind = $mainMod, D, exec, rofi -show drun
 bind = $mainMod, Q, killactive
 bind = $mainMod, F, fullscreen, 1
 
-# ======================================================
-# PaperWM MOUSE WORKFLOW
-# ======================================================
+# ------------------------------------------------------
+# PaperWM-like mouse workflow
+# ------------------------------------------------------
 
 # Scroll horizontally through columns (SUPER + wheel)
 bind = $mainMod, mouse_down, movefocus, r
@@ -123,18 +177,17 @@ bind = $mainMod, mouse_up, movefocus, l
 bind = $mainMod SHIFT, mouse_down, movewindow, r
 bind = $mainMod SHIFT, mouse_up, movewindow, l
 
-# Grab window with mouse (like PaperWM drag)
+# Drag window with mouse (closest practical to "drag titlebar to reorder")
 bindm = $mainMod, mouse:272, movewindow
-
-# Resize with mouse
 bindm = $mainMod SHIFT, mouse:272, resizewindow
 
-# Overview (PaperWM style)
+# Overview
 bind = $mainMod, Tab, scroller:toggleoverview
 
-# Screenshots
+# Screenshots (copy selection to clipboard)
 bind = , Print, exec, grim -g "$(slurp)" - | wl-copy
 EOF
 
 log "Done: Hyprland + hyprscroller + Noctalia (GDM-ready)"
-log "Select 'Hyprland' session in GDM gear menu."
+log "GDM: choose session 'Hyprland' via the gear icon on the login screen."
+log "Note: hyprscroller installs on first Hyprland start (needs network once)."
