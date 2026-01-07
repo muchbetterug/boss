@@ -194,7 +194,7 @@ BUILD_DEPS=(
 #######################################################################
 
 log "Installing packages using dnf5..."
-dnf5 install --setopt=install_weak_deps=False -y \
+dnf5 install --skip-unavailable --setopt=install_weak_deps=False -y \
   "${FONTS[@]}" \
   "${HYPR_DEPS[@]}" \
   "${HYPR_PKGS[@]}" \
