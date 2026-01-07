@@ -103,13 +103,12 @@ HYPR_DEPS=(
 	qalculate-gtk
 	qt5ct
 	qt6ct
-	rofi-wayland
 	slurp
 	swappy
 	swaync
 	swww
 	tumbler
-        rofi
+    rofi
 	upower
 	wallust
 	waybar
