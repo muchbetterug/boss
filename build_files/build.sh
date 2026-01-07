@@ -1,201 +1,237 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
 
-# setup.sh — Bluefin/uBlue (Fedora): Hyprland + hyprscrolling (PaperWM-like via scroller layout)
-#           + Noctalia Shell (+ quickshell)
+set -ouex pipefail
+
+# RELEASE="$(rpm -E %fedora)"
+
+log() {
+	echo "=== $* ==="
+}
+
+# if true, sddm will be installed as the display manager.
+# NOTE: NOT FULLY IMPLEMENTED AND UNTESTED, DO NOT USE YET
+USE_SDDM=FALSE
+
+#######################################################################
+# Setup Repositories
+#######################################################################
+
+log "Enable Copr repos..."
+COPR_REPOS=(
+	erikreider/SwayNotificationCenter # for swaync
+	errornointernet/packages
+	heus-sueh/packages                # for matugen/swww, needed by hyprpanel
+	leloubil/wl-clip-persist
+	# pgdev/ghostty
+	solopasha/hyprland
+	tofik/sway
+	ulysg/xwayland-satellite
+	yalter/niri
+)
+for repo in "${COPR_REPOS[@]}"; do
+	# Try to enable the repo, but don't fail the build if it doesn't support this Fedora version
+	if ! dnf5 -y copr enable "$repo" 2>&1; then
+		log "Warning: Failed to enable COPR repo $repo (may not support Fedora $RELEASE)"
+	fi
+done
+
+# log "Enable terra repositories..."
+# Bazzite disabled this for some reason so lets re-enable it again
+# dnf5 config-manager setopt terra.enabled=1 terra-extras.enabled=1
+
+#######################################################################
+## Install Packages
+#######################################################################
+
+# Note that these fedora font packages are preinstalled in the
+# bluefin-dx image, along with the SymbolsNerdFont which doesn't
+# have an associated fedora package:
 #
-# Bluefin image notes:
-# - Build runs as root → no sudo.
-# - Avoid /usr/local; use /usr/bin or /usr/libexec.
-# - hyprscrolling is enabled per-user via hyprpm on first Hyprland start (needs network once).
-# - Seed Noctalia + Hyprland config into /etc/skel for new users.
+#   adobe-source-code-pro-fonts
+#   google-droid-sans-fonts
+#   google-noto-sans-cjk-fonts
+#   google-noto-color-emoji-fonts
+#   jetbrains-mono-fonts
+#
+# Because the nerd font symbols are mapped correctly, we can get
+# nerd font characters anywhere.
+FONTS=(
+	fira-code-fonts
+	fontawesome-fonts-all
+	google-noto-emoji-fonts
+)
 
-log() { echo -e "\n==> $*"; }
+# Hyprland dependencies to be installed, based on
+# https://github.com/JaKooLit/Fedora-Hyprland/ with additions
+# from ml4w and other sources.
+HYPR_DEPS=(
+	aquamarine
+	aylurs-gtk-shell2
+	blueman
+	bluez
+	bluez-tools
+	brightnessctl
+	btop
+	cava
+	cliphist
+	# egl-wayland
+	eog
+	fuzzel
+	gnome-bluetooth
+	grim
+	grimblast
+	gvfs
+	hyprpanel
+	inxi
+	kvantum
+	# lib32-nvidia-utils
+	libgtop2
+	mako
+	matugen
+	mpv
+	# mpv-mpris
+	network-manager-applet
+	nodejs
+	# nvidia-dkms
+	# nvidia-utils
+	nwg-look
+	pamixer
+	pavucontrol
+	playerctl
+	# power-profiles-daemon
+	python3-pyquery
+	qalculate-gtk
+	qt5ct
+	qt6ct
+	rofi-wayland
+	slurp
+	swappy
+	swaync
+	swww
+	tumbler
+	upower
+	wallust
+	waybar
+	wget2
+	wireplumber
+	wl-clipboard
+	wl-clip-persist
+	wlogout
+	wlr-randr
+	xarchiver
+	xdg-desktop-portal-gtk
+	xdg-desktop-portal-hyprland
+	xwayland-satellite
+	yad
+)
 
-if [[ "$(id -u)" -ne 0 ]]; then
-  echo "ERROR: run this script as root (image build context)." >&2
-  exit 1
+# Hyprland ecosystem packages
+HYPR_PKGS=(
+	hyprland
+	hyprcursor
+	hyprpaper
+	hyprpicker
+	hypridle
+	hyprlock
+	hyprshot
+	xdg-desktop-portal-hyprland
+	hyprsunset
+	hyprutils
+)
+
+# Detect if we're on Bazzite (has KDE/Qt 6.10) or Bluefin (has GNOME/Qt 6.9)
+# These Qt-dependent packages only work on Bluefin currently due to Qt version mismatch
+if ! grep -qi "bazzite" /usr/lib/os-release 2>/dev/null; then
+	# Only add Qt-dependent packages on Bluefin
+	HYPR_PKGS+=(
+		hyprsysteminfo
+		hyprpolkitagent
+		hyprland-qt-support
+	)
 fi
 
-# Bluefin/uBlue: sometimes "updates-archive" repo is broken (404). Disable it (harmless if not present).
-if grep -Rqs "^\[updates-archive\]" /etc/yum.repos.d 2>/dev/null; then
-  log "Disable broken repo: updates-archive"
-  sed -i '/^\[updates-archive\]/,/^\[/{s/^\(enabled\s*=\s*\)1/\10/}' /etc/yum.repos.d/*.repo || true
+# Niri and its dependencies from its default config.
+# commented out packages are already referenced in this file, OR they
+# are prebundled inside our parent image.
+NIRI_PKGS=(
+	niri
+	swaylock
+	# alacritty
+	# brightnessctl
+	# fuzzel
+	# mako
+	# waybar
+	# xwayland-satellite
+	# gnome-keyring
+	# wireplumber
+	# xdg-desktop-portal-gnome
+	# xdg-desktop-portal-gtk
+)
+
+# SDDM not set up properly yet, so this is just a placeholder.
+# For now you'll have to invoke Hyprland from the command line.
+SDDM_PACKAGES=()
+if [[ $USE_SDDM == TRUE ]]; then
+	SDDM_PACKAGES=(
+		sddm
+		sddm-breeze
+		sddm-kcm
+		qt6-qt5compat
+	)
 fi
 
-DNF=(dnf5 -y --disablerepo=updates-archive)
+# chrome etc are installed as flatpaks. We generally prefer that
+# for most things with GUIs, and homebrew for CLI apps. This list is
+# only special GUI apps that need to be installed at the system level.
+ADDITIONAL_SYSTEM_APPS=(
+	alacritty
 
-log "Refresh repos"
-"${DNF[@]}" clean all
-"${DNF[@]}" --refresh upgrade || true
-"${DNF[@]}" makecache
+	# ghostty is broken in Fedora 42 right now
+	# ghostty
 
-log "Install COPR plugin (dnf5-plugins)"
-"${DNF[@]}" install dnf5-plugins
+	kitty
+	kitty-terminfo
 
-# -----------------------------
-# Hyprland + essentials (+ plugin build deps for hyprpm)
-# -----------------------------
-log "Install Hyprland + portals + essentials + build deps for hyprpm plugins"
-"${DNF[@]}" install \
-  git \
-  gcc-c++ \
-  ninja-build \
-  pkgconf-pkg-config \
-  make \
-  cmake \
-  meson \
-  cpio \
-  \
-  hyprland \
-  xdg-desktop-portal-hyprland \
-  hyprutils \
-  hyprutils-devel \
-  \
-  foot rofi \
-  wl-clipboard \
-  grim slurp \
-  swaylock \
-  xdg-user-dirs \
-  adwaita-icon-theme \
-  \
-  mesa-libGL-devel \
-  mesa-libEGL-devel \
-  mesa-libGLES-devel \
-  libdrm-devel \
-  wayland-devel \
-  libxkbcommon-devel \
-  pixman-devel
+	thunar
+	thunar-volman
+	thunar-archive-plugin
+)
 
-# Optional niceties (do not fail build if unavailable)
-"${DNF[@]}" install wayland-utils xorg-x11-xauth || true
+# we do all package installs in one rpm-ostree command
+# so that we create minimal layers in the final image
+log "Installing packages using dnf5..."
+dnf5 install --setopt=install_weak_deps=False -y \
+	"${FONTS[@]}" \
+	"${HYPR_DEPS[@]}" \
+	"${HYPR_PKGS[@]}" \
+	"${NIRI_PKGS[@]}" \
+	"${SDDM_PACKAGES[@]}" \
+	"${ADDITIONAL_SYSTEM_APPS[@]}"
 
-# -----------------------------
-# Noctalia Shell (+ quickshell) via COPR
-# -----------------------------
-log "Enable COPR: zhangyi6324/noctalia-shell"
-"${DNF[@]}" copr enable zhangyi6324/noctalia-shell
+#######################################################################
+### Disable repositeories so they aren't cluttering up the final image
 
-log "Install Noctalia Shell + quickshell"
-"${DNF[@]}" install noctalia-shell quickshell
+log "Disable Copr repos to get rid of clutter..."
+for repo in "${COPR_REPOS[@]}"; do
+	dnf5 -y copr disable "$repo"
+done
 
-# -----------------------------
-# hyprscrolling bootstrap helper (per-user via hyprpm)
-# -----------------------------
-log "Install hyprscrolling bootstrap helper (/usr/bin/hyprplugins-bootstrap)"
-install -Dm0755 /dev/stdin /usr/bin/hyprplugins-bootstrap <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
+#######################################################################
+### Enable Services
 
-command -v hyprpm >/dev/null 2>&1 || exit 0
+# TODO: these need to be run at first boot, not during image build
 
-# only useful inside a Hyprland session
-if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
-  exit 0
+# Setting Thunar as the default file manager
+# xdg-mime default thunar.desktop inode/directory
+# xdg-mime default thunar.desktop application/x-wayland-gnome-saved-search
+
+if [[ $USE_SDDM == TRUE ]]; then
+	log "Installing sddm...."
+	for login_manager in lightdm gdm lxdm lxdm-gtk3; do
+		if sudo dnf list installed "$login_manager" &>>/dev/null; then
+			sudo systemctl disable "$login_manager" 2>&1 | tee -a "$LOG"
+		fi
+	done
+	systemctl set-default graphical.target
+	systemctl enable sddm.service
 fi
-
-# hyprscrolling lives in hyprwm/hyprland-plugins
-hyprpm add https://github.com/hyprwm/hyprland-plugins || true
-hyprpm enable hyprscrolling || true
-
-# keep it best-effort; don't break login if something is off
-#hyprpm update || true
-#hyprpm reload -n || true
-EOF
-
-# -----------------------------
-# Seed Noctalia config into /etc/skel (best-effort)
-# -----------------------------
-log "Seed Noctalia config into /etc/skel (best-effort)"
-install -d /etc/skel/.config
-env HOME=/etc/skel noctalia-shell --copy --force || true
-
-# -----------------------------
-# Default Hyprland config for new users (/etc/skel)
-# -----------------------------
-log "Write /etc/skel Hyprland config (PaperWM-style, mouse-first, Noctalia full shell)"
-install -d /etc/skel/.config/hypr
-
-install -Dm0644 /dev/stdin /etc/skel/.config/hypr/hyprland.conf <<'EOF'
-# ======================================================
-# Hyprland + hyprscrolling (PaperWM-like via "scroller" layout)
-# Mouse-centric workflow + Noctalia as full shell
-# ======================================================
-
-$mainMod = SUPER
-
-gestures {
-  # Hyprland swipe can conflict with scroller behavior
-  workspace_swipe = off
-}
-
-general {
-  layout = scroller
-  gaps_in = 6
-  gaps_out = 10
-  border_size = 2
-}
-
-decoration {
-  rounding = 10
-}
-
-input {
-  follow_mouse = 1
-}
-
-# ------------------------------------------------------
-# Startup: Polkit + Noctalia + hyprscrolling bootstrap
-# ------------------------------------------------------
-
-# Polkit agent (choose the first existing path)
-exec-once = sh -lc 'for a in \
-  /usr/libexec/polkit-kde-authentication-agent-1 \
-  /usr/lib/polkit-kde-authentication-agent-1 \
-  /usr/libexec/lxqt-policykit-agent; do \
-    [ -x "$a" ] && exec "$a"; \
-  done'
-
-# Noctalia full shell
-exec-once = noctalia-shell
-
-# Install/enable hyprscrolling per-user (hyprpm is per-home)
-exec-once = /usr/bin/hyprplugins-bootstrap
-
-# Center active column (PaperWM core feel)
-exec-once = hyprctl dispatch scroller:setmode center_column
-
-# ------------------------------------------------------
-# Apps / basics
-# ------------------------------------------------------
-bind = $mainMod, Return, exec, foot
-bind = $mainMod, D, exec, rofi -show drun
-bind = $mainMod, Q, killactive
-bind = $mainMod, F, fullscreen, 1
-
-# ------------------------------------------------------
-# PaperWM-like mouse workflow
-# ------------------------------------------------------
-
-# Scroll horizontally through columns (SUPER + wheel)
-bind = $mainMod, mouse_down, movefocus, r
-bind = $mainMod, mouse_up, movefocus, l
-
-# Reorder windows by scrolling (SUPER+SHIFT + wheel)
-bind = $mainMod SHIFT, mouse_down, movewindow, r
-bind = $mainMod SHIFT, mouse_up, movewindow, l
-
-# Drag window with mouse
-bindm = $mainMod, mouse:272, movewindow
-bindm = $mainMod SHIFT, mouse:272, resizewindow
-
-# Overview (provided by hyprscrolling)
-bind = $mainMod, Tab, scroller:toggleoverview
-
-# Screenshots (copy selection to clipboard)
-bind = , Print, exec, grim -g "$(slurp)" - | wl-copy
-EOF
-
-log "Done: Hyprland + hyprscrolling + Noctalia (GDM-ready)"
-log "GDM: choose session 'Hyprland' via the gear icon on the login screen."
-log "Note: hyprscrolling installs/enables on first Hyprland start (needs network once)."
