@@ -109,6 +109,7 @@ HYPR_DEPS=(
 	swaync
 	swww
 	tumbler
+        rofi
 	upower
 	wallust
 	waybar
