@@ -37,6 +37,7 @@ log "Install Hyprland + portals + essentials"
 $SUDO "${DNF[@]}" install \
 gcc-c++ \
 ninja-build \
+pkgconf-pkg-config \
 make \
 cmake \
 meson \
