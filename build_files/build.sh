@@ -49,6 +49,8 @@ log "Install Hyprland + portals + essentials + build deps for hyprpm plugins"
   \
   hyprland \
   xdg-desktop-portal-hyprland \
+  hyprutils \
+  hyprutils-devel \
   \
   foot rofi \
   wl-clipboard \
@@ -97,8 +99,8 @@ hyprpm add https://github.com/hyprwm/hyprland-plugins || true
 hyprpm enable hyprscrolling || true
 
 # keep it best-effort; don't break login if something is off
-hyprpm update || true
-hyprpm reload -n || true
+#hyprpm update || true
+#hyprpm reload -n || true
 EOF
 
 # -----------------------------
