@@ -93,11 +93,10 @@ $SUDO "${DNF[@]}" install noctalia-shell quickshell
 #  exit 0
 #fi
 
-# PaperWM-like scrolling layout plugin
-#hyprpm add https://github.com/dawsers/hyprscroller
-#hyprpm enable hyprscroller
-#hyprpm reload -n || true
-#EOF
+
+hyprpm add https://github.com/hyprwm/hyprland-plugins
+hyprpm enable hyprscrolling
+
 
 # -----------------------------
 # Seed Noctalia config into /etc/skel so new users get full shell OOTB
