@@ -209,6 +209,47 @@ dnf5 install --setopt=install_weak_deps=False -y \
 	"${SDDM_PACKAGES[@]}" \
 	"${ADDITIONAL_SYSTEM_APPS[@]}"
 
+dnf5 -y --setopt=install_weak_deps=False install \
+  gcc gcc-c++ \
+  clang llvm \
+  cmake meson \
+  pkg-config \
+  git \
+  cpio \
+  ninja \
+  python3 \
+  wayland-devel \
+  wayland-protocols-devel \
+  libXcursor-devel \
+  libXrandr-devel \
+  libXinerama-devel \
+  libXwayland-devel \
+  libX11-devel \
+  libxcb-devel \
+  libXi-devel \
+  mesa-libGL-devel \
+  mesa-libEGL-devel \
+  mesa-libgbm-devel \
+  libdrm-devel \
+  cairo-devel \
+  pango-devel \
+  pixman-devel \
+  libjpeg-turbo-devel \
+  libpng-devel \
+  pipewire-jack-audio-connection-kit-devel \
+  libseat-devel \
+  seatd-devel \
+  dbus-devel \
+  systemd-devel \
+  libuuid-devel \
+  nvidia-driver \
+  nvidia-driver-devel \
+  egl-wayland \
+  libinput-devel \
+  xcb-util-wm-devel \
+  xcb-util-renderutil-devel \
+  xcb-util-devel
+
 #######################################################################
 ### Disable repositeories so they aren't cluttering up the final image
 
