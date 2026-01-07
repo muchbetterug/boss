@@ -222,7 +222,7 @@ dnf5 -y --setopt=install_weak_deps=False install \
   libXcursor-devel \
   libXrandr-devel \
   libXinerama-devel \
-  libXwayland-devel \
+  xwayland-devel \
   libX11-devel \
   libxcb-devel \
   libXi-devel \
@@ -237,7 +237,6 @@ dnf5 -y --setopt=install_weak_deps=False install \
   libpng-devel \
   pipewire-jack-audio-connection-kit-devel \
   libseat-devel \
-  seatd-devel \
   dbus-devel \
   systemd-devel \
   libuuid-devel \
