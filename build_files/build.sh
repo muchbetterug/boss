@@ -39,7 +39,9 @@ log "Enable COPR: zhangyi6324/noctalia-shell"
 $SUDO "${DNF[@]}" copr enable zhangyi6324/noctalia-shell
 
 log "Install Noctalia Shell + quickshell"
-$SUDO "${DNF[@]}" install noctalia-shell quickshell
+$SUDO "${DNF[@]}" install noctalia-shell quickshell rofi foot
+
+
 
 log "Done: mangowc + noctalia-shell + quickshell installed"
 log "Hint: In a container, starting a compositor may require proper /dev/dri + seat/session setup at runtime."
