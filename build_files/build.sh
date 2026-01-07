@@ -35,6 +35,9 @@ $SUDO "${DNF[@]}" install dnf5-plugins
 # -----------------------------
 log "Install Hyprland + portals + essentials"
 $SUDO "${DNF[@]}" install \
+  cmake \
+  meson \
+  cpio \
   hyprland \
   xdg-desktop-portal-hyprland \
   foot rofi \
@@ -63,34 +66,34 @@ $SUDO "${DNF[@]}" install noctalia-shell quickshell
 # Polkit agent (reliable with Hyprland)
 # -----------------------------
 # Noctalia COPR already pulled polkit-kde in your logs, but we ensure it exists.
-log "Install polkit agent (polkit-kde)"
-$SUDO "${DNF[@]}" install polkit-kde
+#log "Install polkit agent (polkit-kde)"
+#$SUDO "${DNF[@]}" install polkit-kde
 
 # -----------------------------
 # hyprscroller bootstrap helper (per-user via hyprpm)
 # DO NOT use /usr/local on Bluefin images
 # -----------------------------
-log "Install hyprscroller bootstrap helper (/usr/bin)"
-$SUDO install -Dm0755 /dev/stdin /usr/bin/hyprscroller-bootstrap <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
+#log "Install hyprscroller bootstrap helper (/usr/bin)"
+#$SUDO install -Dm0755 /dev/stdin /usr/bin/hyprscroller-bootstrap <<'EOF'
+##!/usr/bin/env bash
+#set -euo pipefail
 
 # Runs inside a Hyprland session (exec-once).
 # Installs & enables hyprscroller via hyprpm if missing, then reloads plugins.
 
-command -v hyprpm >/dev/null 2>&1 || exit 0
+#command -v hyprpm >/dev/null 2>&1 || exit 0
 
 # Already installed?
-if hyprpm list 2>/dev/null | grep -qi hyprscroller; then
-  hyprpm reload -n || true
-  exit 0
-fi
+#if hyprpm list 2>/dev/null | grep -qi hyprscroller; then
+#  hyprpm reload -n || true
+#  exit 0
+#fi
 
 # PaperWM-like scrolling layout plugin
-hyprpm add https://github.com/dawsers/hyprscroller
-hyprpm enable hyprscroller
-hyprpm reload -n || true
-EOF
+#hyprpm add https://github.com/dawsers/hyprscroller
+#hyprpm enable hyprscroller
+#hyprpm reload -n || true
+#EOF
 
 # -----------------------------
 # Seed Noctalia config into /etc/skel so new users get full shell OOTB
@@ -102,7 +105,7 @@ $SUDO install -d /etc/skel/.config
 $SUDO env HOME=/etc/skel noctalia-shell --copy --force || true
 
 # -----------------------------
-# Default Hyprland config (PaperWM mouse-centric)
+# TOOOOODOOO GEHJT NICHT Default Hyprland config (PaperWM mouse-centric)
 # -----------------------------
 log "Write /etc/skel Hyprland config (PaperWM-style, mouse-first, Noctalia full shell)"
 $SUDO install -d /etc/skel/.config/hypr
