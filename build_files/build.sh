@@ -94,8 +94,22 @@ $SUDO "${DNF[@]}" install noctalia-shell quickshell
 #fi
 
 
-hyprpm add https://github.com/hyprwm/hyprland-plugins
-hyprpm enable hyprscrolling
+$SUDO install -Dm0755 /dev/stdin /usr/bin/hyprplugins-bootstrap <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+command -v hyprpm >/dev/null 2>&1 || exit 0
+
+# nur wenn Hyprland läuft (sonst sinnlos)
+if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+  exit 0
+fi
+
+# OFFIZIELL: hyprscrolling aus hyprland-plugins
+hyprpm add https://github.com/hyprwm/hyprland-plugins || true
+hyprpm enable hyprscrolling || true
+hyprpm reload -n || true
+EOF
 
 
 # -----------------------------
