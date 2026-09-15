@@ -11,26 +11,15 @@ log() {
 # Setup Repositories
 #######################################################################
 
-log "Enable Copr repos..."
-COPR_REPOS=(
-    scrollwm/packages
-    zhangyi6324/noctalia-shell
-)
+# COSMIC liegt komplett in den offiziellen Fedora-Repos -> kein Copr nötig.
 
-for repo in "${COPR_REPOS[@]}"; do
-  # Try to enable the repo, but don't fail the build if it doesn't support this Fedora version
-  if ! dnf5 -y copr enable "$repo" 2>&1; then
-    log "Warning: Failed to enable COPR repo $repo (may not support Fedora $RELEASE)"
-  fi
-done
-
-# Your error is a 404 from fedoraproject-updates-archive.* -> disable it hard
+# fedoraproject-updates-archive liefert in manchen Basis-Images 404 -> hart abschalten
 log "Disable Fedora updates-archive repos (404 in some base images)..."
 dnf5 -y config-manager setopt '*updates-archive*.enabled=0' || true
 dnf5 -y config-manager setopt '*-updates-archive.enabled=0' || true
 
 # Refresh metadata/caches
-log "Refresh dnf metadata..."
+log "Refresh dnf metadata (Fedora ${RELEASE})..."
 dnf5 clean all || true
 rm -rf /var/cache/dnf /var/cache/libdnf5 || true
 dnf5 makecache --refresh || true
@@ -39,28 +28,36 @@ dnf5 makecache --refresh || true
 ## Install Packages
 #######################################################################
 
+# cosmic-session zieht den kompletten Desktop als *harte* Abhängigkeit nach:
+# cosmic-comp, -panel, -applets, -launcher, -settings(-daemon), -files, -term,
+# -workspaces, -notifications, -osd, -bg, -idle, -randr, -screenshot,
+# -app-library, -icons, -initial-setup, cosmic-greeter, xdg-desktop-portal-cosmic
+# sowie cosmic-config-fedora (liefert "system-cosmic-config").
+COSMIC_PKGS=(
+  cosmic-session
+  cosmic-edit
+  cosmic-icon-theme
+  cosmic-wallpapers # nur "Recommends", wird mit install_weak_deps=False sonst weggelassen
+  xdg-desktop-portal-cosmic
+)
+
+# Weitere COSMIC-Apps nach Geschmack: cosmic-store, cosmic-player, cosmic-monitor
+# (Bluefin bringt für den Store-Teil schon Bazaar/GNOME Software mit).
+
 FONTS=(
+  # von cosmic-session hart verlangt, hier nur zur Dokumentation explizit gelistet
+  google-noto-sans-mono-fonts
+  open-sans-fonts
+
   fira-code-fonts
   fontawesome-fonts-all
   google-noto-emoji-fonts
 )
 
-# Hyprland ecosystem packages
-SCROLL_PKGS=(
-    scroll
-    noctalia-shell
-    quickshell
-)
-
 # Special GUI apps that need to be installed at the system level.
 ADDITIONAL_SYSTEM_APPS=(
-  alacritty
   kitty
   kitty-terminfo
-  rofi
-  thunar
-  thunar-volman
-  thunar-archive-plugin
 )
 
 log "Installing packages using dnf5..."
@@ -71,11 +68,49 @@ dnf5 install -y \
   --setopt=timeout=60 \
   --disablerepo='*updates-archive*' \
   --skip-unavailable \
+  "${COSMIC_PKGS[@]}" \
   "${FONTS[@]}" \
-  "${SCROLL_PKGS[@]}" \
   "${ADDITIONAL_SYSTEM_APPS[@]}"
 
-log "Disable Copr repos to get rid of clutter..."
-for repo in "${COPR_REPOS[@]}"; do
-  dnf5 -y copr disable "$repo" || true
-done
+#######################################################################
+### Display-Manager / Sessions
+#######################################################################
+
+# Bluefin bleibt bei GDM. Wichtig: cosmic-greeter.service hat
+# "Alias=display-manager.service" und wird von Fedoras
+# /usr/lib/systemd/system-preset/85-display-manager.preset automatisch aktiviert
+# (rhbz#2305602) -> würde mit GDM um den display-manager-Symlink streiten.
+log "Keep GDM as display manager, disable cosmic-greeter..."
+systemctl disable cosmic-greeter.service || true
+systemctl --force enable gdm.service
+
+# cosmic-greeter-daemon macht die PAM-Authentifizierung für den COSMIC-Lockscreen
+# und steht *nicht* im Preset -> explizit aktivieren, sonst lässt sich eine gesperrte
+# COSMIC-Session nicht mehr entsperren.
+log "Enable cosmic-greeter-daemon (needed by the COSMIC lock screen)..."
+systemctl enable cosmic-greeter-daemon.service
+
+# Sanity-Check: ohne diese Datei taucht COSMIC in der GDM-Sessionauswahl nicht auf.
+log "Verify COSMIC wayland session is present..."
+test -f /usr/share/wayland-sessions/cosmic.desktop
+
+#######################################################################
+### Cleanup
+#######################################################################
+
+# bootc container lint will /run leer und /var ohne Datei-Leichen sehen.
+log "Clean up build leftovers..."
+dnf5 clean all || true
+rm -rf /var/lib/dnf/repos /run/dnf /run/selinux-policy || true
+
+#######################################################################
+### NVIDIA
+#######################################################################
+
+# nvidia-drm.modeset=1 setzt das bluefin-nvidia-Image schon selbst, cosmic-comp
+# läuft damit auf dem proprietären Treiber (explicit sync ab Treiber 555).
+# Falls es auf Multi-Monitor flackert/tearing gibt, hilft meist Direct Scanout aus:
+#
+# install -Dm0644 /dev/stdin /usr/lib/environment.d/90-cosmic-nvidia.conf <<'EOF'
+# COSMIC_DISABLE_DIRECT_SCANOUT=1
+# EOF
