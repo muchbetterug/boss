@@ -37,12 +37,12 @@ COSMIC_PKGS=(
   cosmic-session
   cosmic-edit
   cosmic-icon-theme
+  cosmic-store # verwaltet Flatpaks (Flathub), nicht das bootc-Image selbst
   cosmic-wallpapers # nur "Recommends", wird mit install_weak_deps=False sonst weggelassen
   xdg-desktop-portal-cosmic
 )
 
-# Weitere COSMIC-Apps nach Geschmack: cosmic-store, cosmic-player, cosmic-monitor
-# (Bluefin bringt für den Store-Teil schon Bazaar/GNOME Software mit).
+# Weitere COSMIC-Apps nach Geschmack: cosmic-player, cosmic-monitor
 
 FONTS=(
   # von cosmic-session hart verlangt, hier nur zur Dokumentation explizit gelistet
