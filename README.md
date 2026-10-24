@@ -1,11 +1,45 @@
 # boss
 
-Custom bootc-Image auf Basis von **bluefin-nvidia** (`ghcr.io/projectbluefin/bluefin-nvidia:stable`)
-mit zusätzlich installiertem **COSMIC Desktop** (Epoch 1.x aus den offiziellen Fedora-Repos).
+Custom bootc-Image auf Basis von **bluefin-nvidia-open** (`ghcr.io/ublue-os/bluefin-nvidia-open:stable`)
+mit zwei zusätzlichen Desktops, beide aus den offiziellen Fedora-Repos (kein Copr):
+
+- **COSMIC Desktop** (Epoch 1.x) — der schnelle, vollständige DE.
+- **niri + Noctalia** — scrollendes Tiling nach dem PaperWM-Modell, dazu Noctalia v5
+  als Shell (Bar, Launcher, Notifications, Lockscreen, Wallpaper, Settings).
 
 GDM bleibt der Display-Manager: die Session wird beim Login über das Zahnrad unten rechts
-ausgewählt (`COSMIC` vs. `GNOME`). Was installiert wird, steht in
+ausgewählt (`COSMIC`, `niri` oder `GNOME`). Was installiert wird, steht in
 [`build_files/build.sh`](./build_files/build.sh).
+
+## niri: scrollendes Tiling
+
+niri legt alle Fenster in einen **endlosen horizontalen Streifen** aus Spalten und scrollt
+darin — genau das PaperWM-Modell, nur als nativer Compositor statt als GNOME-Extension.
+Auf dem 5120px-Ultrawide liegen damit drei Spalten nebeneinander, der Rest scrollt durch.
+
+**Schwebende Fenster gehen gleichzeitig:** jeder Workspace hat ein Tiling- **und** ein
+Floating-Layout, dauerhaft und pro Fenster umschaltbar — anders als PaperWMs Scratch-Layer,
+der nur als Gruppe ein- und ausgeblendet wird.
+
+| Taste | Wirkung |
+| --- | --- |
+| `Mod+V` | Fenster zwischen Tiling und Floating umschalten |
+| `Mod+Shift+V` | Fokus zwischen Floating- und Tiling-Ebene wechseln |
+| `Mod+C` | aktive Spalte zentrieren |
+| `Mod+R` / `Mod+Shift+R` | Spaltenbreite / Fensterhöhe durchschalten |
+| `Mod+F` / `Mod+Ctrl+F` | Spalte maximieren / auf freie Breite ausdehnen |
+| `Mod+[` / `Mod+]` | Fenster in die Spalte links/rechts aufnehmen bzw. ausstoßen |
+| `Mod+Ctrl+Up/Down` | Fenster innerhalb der Spalte verschieben |
+| `Mod+W` | Spalte als Tabs anzeigen |
+
+Die Konfiguration liegt **nicht im Image**, sondern im Home (`~/.config/niri/`): `config.kdl`
+inkludiert am Ende `noctalia.kdl` (Farben) und `boss.kdl` (Monitore, Layout, Autostart).
+Damit überlebt sie jedes `bootc upgrade`. Prüfen mit `niri validate`.
+
+Zwei Dinge macht niri selbst und dürfen **nicht** zusätzlich gestartet werden:
+XWayland (seit 25.08 wird `xwayland-satellite` bei Bedarf automatisch gespawnt) und
+die Session-Einbindung über `niri-session`. Der Polkit-Agent dagegen fehlt niri — den
+startet `boss.kdl`, weil ihn sonst kein Rechte-Dialog erreicht.
 
 ```sh
 # lokal bauen und testen

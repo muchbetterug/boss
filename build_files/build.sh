@@ -11,7 +11,10 @@ log() {
 # Setup Repositories
 #######################################################################
 
-# COSMIC liegt komplett in den offiziellen Fedora-Repos -> kein Copr nötig.
+# COSMIC, niri und Noctalia liegen alle in den offiziellen Fedora-Repos -> kein Copr nötig.
+# (Der alte scroll/noctalia-Stand in 'build copy3.sh' brauchte noch zwei Coprs: scrollwm/packages
+#  und zhangyi6324/noctalia-shell. Letzteres lieferte Noctalia v4 auf Quickshell-Basis, das seit
+#  dem v5-Rewrite (nativ C++/OpenGL ES, kein Quickshell mehr) nicht mehr gepflegt wird.)
 
 # fedoraproject-updates-archive liefert in manchen Basis-Images 404 -> hart abschalten
 log "Disable Fedora updates-archive repos (404 in some base images)..."
@@ -44,6 +47,34 @@ COSMIC_PKGS=(
 
 # Weitere COSMIC-Apps nach Geschmack: cosmic-player, cosmic-monitor
 
+# Zweite Session: niri (scrollendes Tiling wie PaperWM) mit Noctalia als Shell.
+# niri bringt /usr/share/wayland-sessions/niri.desktop mit und taucht damit von selbst
+# in der GDM-Auswahl auf -- ohne Greeter, also ohne den display-manager-Konflikt,
+# den cosmic-greeter weiter unten nötig macht.
+NIRI_PKGS=(
+  niri
+  noctalia # v5: Bar, Launcher, Notifications, Lockscreen, Wallpaper, Settings in einem
+
+  # niri ist bewusst minimal und bringt vieles nicht selbst mit:
+  xwayland-satellite # kein eingebautes XWayland -> X11-Apps brauchen das
+  mate-polkit # Polkit-Agent; unter GNOME/COSMIC erledigt das die Shell selbst
+  swayidle # Idle-Handling (Noctalia deckt den Lockscreen ab, swaylock bleibt Fallback)
+  swaylock
+
+  # von der bestehenden ~/.config/niri referenziert:
+  alacritty # config.kdl: Mod+T
+  fuzzel # config.kdl: Mod+D
+  ddcutil # boss.kdl: XF86MonBrightness* über DDC/CI am Ultrawide
+
+  # Kleinkram, den eine nackte Session sonst vermissen lässt:
+  brightnessctl
+  cliphist
+  grim
+  playerctl
+  slurp
+  wl-clipboard
+)
+
 FONTS=(
   # von cosmic-session hart verlangt, hier nur zur Dokumentation explizit gelistet
   google-noto-sans-mono-fonts
@@ -69,6 +100,7 @@ dnf5 install -y \
   --disablerepo='*updates-archive*' \
   --skip-unavailable \
   "${COSMIC_PKGS[@]}" \
+  "${NIRI_PKGS[@]}" \
   "${FONTS[@]}" \
   "${ADDITIONAL_SYSTEM_APPS[@]}"
 
@@ -91,8 +123,10 @@ log "Enable cosmic-greeter-daemon (needed by the COSMIC lock screen)..."
 systemctl enable cosmic-greeter-daemon.service
 
 # Sanity-Check: ohne diese Datei taucht COSMIC in der GDM-Sessionauswahl nicht auf.
-log "Verify COSMIC wayland session is present..."
+log "Verify wayland sessions are present..."
 test -f /usr/share/wayland-sessions/cosmic.desktop
+test -f /usr/share/wayland-sessions/niri.desktop
+test -x /usr/bin/noctalia
 
 #######################################################################
 ### Cleanup
@@ -107,8 +141,8 @@ rm -rf /var/lib/dnf/repos /run/dnf /run/selinux-policy || true
 ### NVIDIA
 #######################################################################
 
-# nvidia-drm.modeset=1 setzt das bluefin-nvidia-Image schon selbst, cosmic-comp
-# läuft damit auf dem proprietären Treiber (explicit sync ab Treiber 555).
+# nvidia-drm.modeset=1 setzt das bluefin-nvidia-open-Image schon selbst, cosmic-comp
+# läuft damit auf dem offenen Kernelmodul (explicit sync ab Treiber 555).
 # Falls es auf Multi-Monitor flackert/tearing gibt, hilft meist Direct Scanout aus:
 #
 # install -Dm0644 /dev/stdin /usr/lib/environment.d/90-cosmic-nvidia.conf <<'EOF'
