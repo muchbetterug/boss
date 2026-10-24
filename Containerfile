@@ -3,9 +3,15 @@ FROM scratch AS ctx
 COPY build_files /
 
 # Base Image
-# Identisch zum aktuell gebooteten Image (siehe `bootc status`)
-FROM ghcr.io/projectbluefin/bluefin-nvidia:stable
-#FROM ghcr.io/projectbluefin/bluefin-nvidia:stable-daily
+# Bluefin "classic" (also nicht -dx) mit NVIDIA.
+# Achtung, die Quelle hat sich verschoben: ghcr.io/projectbluefin/bluefin-nvidia ist am
+# 17.09.2026 stehen geblieben (letzter Tag testing-44.20260917.5), dort kommt nichts mehr
+# nach. Gepflegt wird wieder unter ublue-os, und die proprietäre Variante
+# ghcr.io/ublue-os/bluefin-nvidia endete mit Fedora 42 -> übrig bleibt nvidia-open.
+# Das ist für Turing und neuer der empfohlene Treiber, die RTX 4070 (Ada) fällt darunter.
+FROM ghcr.io/ublue-os/bluefin-nvidia-open:stable
+#FROM ghcr.io/ublue-os/bluefin-nvidia-open:stable-daily # täglich statt wochenweise gated
+#FROM ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable    # dasselbe als Developer-Variante
 #FROM ghcr.io/ublue-os/bazzite:stable
 
 ## Other possible base images include:
