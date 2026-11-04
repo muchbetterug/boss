@@ -42,10 +42,12 @@ COSMIC_PKGS=(
   cosmic-icon-theme
   cosmic-store # verwaltet Flatpaks (Flathub), nicht das bootc-Image selbst
   cosmic-wallpapers # nur "Recommends", wird mit install_weak_deps=False sonst weggelassen
+  cosmic-player # liefert com.system76.CosmicPlayer.desktop; cosmic-mimeapps.list aus
+                # cosmic-session zeigt alle video/*-Typen darauf, ohne das Paket zu ziehen
   xdg-desktop-portal-cosmic
 )
 
-# Weitere COSMIC-Apps nach Geschmack: cosmic-player, cosmic-monitor
+# Weitere COSMIC-Apps nach Geschmack: cosmic-monitor
 
 # Zweite Session: niri (scrollendes Tiling wie PaperWM) mit Noctalia als Shell.
 # niri bringt /usr/share/wayland-sessions/niri.desktop mit und taucht damit von selbst
