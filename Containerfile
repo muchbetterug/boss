@@ -2,6 +2,15 @@
 FROM scratch AS ctx
 COPY build_files /
 
+# cosmic-comp mit Scroll-Streifen: frei waagerecht scrollbare Kachel-Arbeitsfläche.
+# Baut Fedoras aktuelles cosmic-comp-Quellpaket mit build_files/cosmic-comp-scroll/*.patch.
+# Bricht den Image-Bau nie ab; passt der Patch nicht, bleibt unten das Original
+# (siehe einspielen.sh). Die Fedora-Version muss zur Basis passen.
+FROM registry.fedoraproject.org/fedora:44 AS cosmic-comp-scroll
+RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
+    --mount=type=cache,dst=/var/cache/libdnf5 \
+    /ctx/cosmic-comp-scroll/bauen.sh
+
 # Base Image
 # Bluefin "classic" (also nicht -dx) mit NVIDIA.
 # Achtung, die Quelle hat sich verschoben: ghcr.io/projectbluefin/bluefin-nvidia ist am
@@ -42,6 +51,11 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \
     /ctx/build.sh
+
+# gepatchtes cosmic-comp übernehmen, wenn es zur installierten Version passt
+RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
+    --mount=type=bind,from=cosmic-comp-scroll,source=/out,target=/scroll \
+    /ctx/cosmic-comp-scroll/einspielen.sh
 
 ### LINTING
 ## Verify final image and contents are correct.

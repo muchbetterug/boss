@@ -1,0 +1,643 @@
+diff --git a/src/input/actions.rs b/src/input/actions.rs
+index 6015ff85..1c339cb4 100644
+--- a/src/input/actions.rs
++++ b/src/input/actions.rs
+@@ -142,6 +142,7 @@ impl State {
+                     &mut self.common.workspace_state.update(),
+                 );
+             }
++            SwipeAction::ScrollStrip => {}
+         }
+     }
+ 
+@@ -806,6 +807,7 @@ impl State {
+                     FocusResult::Handled => {}
+                     FocusResult::Some(target) => {
+                         Shell::set_focus(self, Some(&target), seat, None, true);
++                        self.common.shell.write().scroll_strip_to_focus(seat);
+                     }
+                 }
+             }
+@@ -863,10 +865,12 @@ impl State {
+                     }
+                     MoveResult::ShiftFocus(shift) => {
+                         Shell::set_focus(self, Some(&shift), seat, None, true);
++                        self.common.shell.write().scroll_strip_to_focus(seat);
+                     }
+                     _ => {
+                         let current_output = seat.active_output();
+                         let mut shell = self.common.shell.write();
++                        shell.scroll_strip_to_focus(seat);
+                         let workspace = shell.active_space(&current_output).unwrap();
+                         if let Some(FocusTarget::Window(focused_window)) =
+                             workspace.focus_stack.get(seat).last()
+diff --git a/src/input/gestures/mod.rs b/src/input/gestures/mod.rs
+index 6c9c2f38..c6beb4dd 100644
+--- a/src/input/gestures/mod.rs
++++ b/src/input/gestures/mod.rs
+@@ -16,6 +16,8 @@ pub struct SwipeEvent {
+ pub enum SwipeAction {
+     NextWorkspace,
+     PrevWorkspace,
++    /// Scroll-Streifen: drei Finger waagerecht verschieben den Ausschnitt
++    ScrollStrip,
+ }
+ 
+ #[derive(Debug, Clone)]
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index d51dd8a6..0d5b66cd 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -97,6 +97,11 @@ pub mod actions;
+ pub mod gestures;
+ pub mod tablet_emu;
+ 
++/// Scroll-Streifen: Anteil der Bildschirmbreite je Rastung des Mausrads
++const STRIP_WHEEL_STEP: f64 = 0.1;
++/// Scroll-Streifen: Verstärkung für Touchpad-Bewegungen
++const STRIP_TOUCHPAD_FACTOR: f64 = 2.0;
++
+ /// Identifies the input backend instance an event came from, used to disambiguate device ids
+ /// (which are only unique within a single backend instance, see
+ /// [`smithay::backend::input::Device::id`]).
+@@ -1117,7 +1122,35 @@ impl State {
+                     self.common.idle_notifier_state.notify_activity(&seat);
+                     notify_cursor_activity(self, &seat, PointerEventKind::Other);
+ 
+-                    if self.source_modifiers(&backend_id, &seat).logo
++                    let modifiers = self.source_modifiers(&backend_id, &seat);
++                    if modifiers.logo && !modifiers.ctrl {
++                        // Scroll-Streifen: Super + Rad verschiebt den Ausschnitt waagerecht
++                        // (die Zoom-Kürzel liegen dafür auf Super + Strg + Rad)
++                        seat.modifiers_shortcut_queue().clear(&backend_id);
++                        let output = seat.active_output();
++                        let viewport_w =
++                            self.common.shell.read().strip_viewport_width(&output) as f64;
++                        let mut dx = 0.0;
++                        for axis in [Axis::Vertical, Axis::Horizontal] {
++                            let mut amount = match event.source() {
++                                AxisSource::Wheel | AxisSource::WheelTilt => event
++                                    .amount_v120(axis)
++                                    .map(|v| v / 120. * viewport_w * STRIP_WHEEL_STEP),
++                                _ => event.amount(axis).map(|v| v * STRIP_TOUCHPAD_FACTOR),
++                            }
++                            .unwrap_or(0.0);
++                            if event.relative_direction(axis) == AxisRelativeDirection::Inverted {
++                                amount = -amount;
++                            }
++                            dx += amount * scroll_factor;
++                        }
++                        if dx != 0.0 {
++                            self.common
++                                .shell
++                                .write()
++                                .scroll_strip(&output, dx.round() as i32);
++                        }
++                    } else if modifiers.logo
+                         && self
+                             .common
+                             .config
+@@ -1248,7 +1281,12 @@ impl State {
+                                 natural_scroll = natural;
+                             }
+                             activate_action = match gesture_state.fingers {
+-                                3 => None, // TODO: 3 finger gestures
++                                3 => match gesture_state.direction {
++                                    Some(Direction::Left) | Some(Direction::Right) => {
++                                        Some(SwipeAction::ScrollStrip)
++                                    }
++                                    _ => None,
++                                },
+                                 4 => {
+                                     if self.common.config.cosmic_conf.workspaces.workspace_layout
+                                         == WorkspaceLayout::Horizontal
+@@ -1305,6 +1343,14 @@ impl State {
+                                     matches!(x, SwipeAction::NextWorkspace),
+                                 )
+                             }
++                            Some(SwipeAction::ScrollStrip) => {
++                                // Inhalt folgt den Fingern
++                                let dx = (-event.delta().x * STRIP_TOUCHPAD_FACTOR).round() as i32;
++                                self.common
++                                    .shell
++                                    .write()
++                                    .scroll_strip(&seat.active_output(), dx);
++                            }
+                             _ => {}
+                         }
+                     } else {
+diff --git a/src/shell/layout/tiling/grabs/resize.rs b/src/shell/layout/tiling/grabs/resize.rs
+index c6f202cf..ae1dd708 100644
+--- a/src/shell/layout/tiling/grabs/resize.rs
++++ b/src/shell/layout/tiling/grabs/resize.rs
+@@ -396,7 +396,12 @@ impl ResizeForkGrab {
+                     .skip(self.left_up_idx);
+                 let first_elem = iter.next();
+                 let second_elem = iter.next();
+-                if first_elem.is_none() || second_elem.is_none() {
++                // Außenrand des Streifens: nur die letzte Spalte, kein Nachbar
++                let strip_end = first_elem.is_some()
++                    && second_elem.is_none()
++                    && self.orientation == Orientation::Vertical
++                    && tree.get(&self.node).unwrap().parent().is_none();
++                if first_elem.is_none() || (second_elem.is_none() && !strip_end) {
+                     return true;
+                 };
+ 
+@@ -404,7 +409,15 @@ impl ResizeForkGrab {
+                     return false;
+                 }
+ 
++                let viewport_w = tiling_layer.strip_viewport_width();
+                 match tree.get_mut(&self.node).unwrap().data_mut() {
++                    Data::Group { sizes, .. } if strip_end => {
++                        let others: i32 = sizes.iter().sum::<i32>() - sizes[self.left_up_idx];
++                        let min = (viewport_w - others).max(360);
++                        sizes[self.left_up_idx] = (sizes[self.left_up_idx]
++                            + self.accumulated_delta.round() as i32)
++                            .max(min);
++                    }
+                     Data::Group {
+                         sizes, orientation, ..
+                     } => {
+@@ -450,6 +463,9 @@ impl ResizeForkGrab {
+                 if should_configure {
+                     let blocker = TilingLayout::update_positions(&output, &mut tree, gaps);
+                     tiling_layer.queue.push_tree(tree, None, blocker);
++                    if strip_end {
++                        tiling_layer.scroll_strip_to_end();
++                    }
+                 }
+             } else {
+                 return true;
+diff --git a/src/shell/layout/tiling/mod.rs b/src/shell/layout/tiling/mod.rs
+index 20e11b71..ea23a369 100644
+--- a/src/shell/layout/tiling/mod.rs
++++ b/src/shell/layout/tiling/mod.rs
+@@ -84,6 +84,13 @@ pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+ pub const MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(150);
+ pub const INITIAL_MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(500);
+ 
++// Scroll-Streifen: Ist die Wurzel des Baums eine Spaltengruppe (Orientation::Vertical),
++// darf sie breiter sein als der Bildschirm. Ihre Breite ist die Summe der Spaltenbreiten,
++// mindestens aber die sichtbare Fläche. Der Versatz des Ausschnitts steckt in der
++// x-Position der Wurzel und braucht darum keinen eigenen Zustand.
++/// So viele Spalten teilen sich den Bildschirm, bevor neue Fenster angehängt werden.
++pub const STRIP_COLUMNS_PER_SCREEN: i32 = 3;
++
+ #[derive(Debug, Clone, PartialEq)]
+ pub struct NodeDesc {
+     pub handle: WorkspaceHandle,
+@@ -281,6 +288,27 @@ impl Data {
+         }
+     }
+ 
++    /// Spalte aus dem Streifen nehmen, ohne ihre Breite an die übrigen zu verteilen:
++    /// der Streifen wird schmaler (`update_positions` füllt notfalls bis zur Bildschirmbreite auf).
++    fn remove_window_from_strip(&mut self, idx: usize) {
++        match self {
++            Data::Group { sizes, .. } => {
++                sizes.remove(idx);
++            }
++            _ => panic!("Removed window from leaf?"),
++        }
++    }
++
++    fn is_strip(&self) -> bool {
++        matches!(
++            self,
++            Data::Group {
++                orientation: Orientation::Vertical,
++                ..
++            }
++        )
++    }
++
+     fn geometry(&self) -> &Rectangle<i32, Local> {
+         match self {
+             Data::Group { last_geometry, .. } => last_geometry,
+@@ -412,6 +440,7 @@ impl TilingLayout {
+         minimize_rect: Option<Rectangle<i32, Local>>,
+     ) {
+         let gaps = self.gaps();
++        let window: CosmicMapped = window.into();
+ 
+         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
+         let last_active = focus_stack
+@@ -425,7 +454,7 @@ impl TilingLayout {
+ 
+         TilingLayout::map_to_tree(
+             &mut tree,
+-            window,
++            window.clone(),
+             &self.output,
+             last_active,
+             direction,
+@@ -433,6 +462,7 @@ impl TilingLayout {
+         );
+         let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+         self.queue.push_tree(tree, duration, blocker);
++        self.scroll_strip_to_window(&window);
+     }
+ 
+     pub fn remap<'a>(
+@@ -581,6 +611,10 @@ impl TilingLayout {
+             } else {
+                 tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
+             }
++        } else if tree.root_node_id().is_some() {
++            // Scroll-Streifen: neue Fenster kommen als eigene Spalte rechts neben die aktive.
++            let zone_w = layer_map_for_output(output).non_exclusive_zone().size.w;
++            TilingLayout::append_to_strip(tree, new_window, node.as_ref(), zone_w)
+         } else if let Some(ref node_id) = node {
+             let orientation = {
+                 let window_size = tree.get(node_id).unwrap().data().geometry().size;
+@@ -615,6 +649,243 @@ impl TilingLayout {
+         *window.tiling_node_id.lock().unwrap() = Some(window_id);
+     }
+ 
++    /// Hängt ein neues Fenster als Spalte rechts neben die Spalte von `focused` an.
++    /// Solange der Streifen nicht breiter als der Bildschirm ist und höchstens
++    /// `STRIP_COLUMNS_PER_SCREEN` Spalten entstehen, teilen sie sich den Bildschirm gleichmäßig;
++    /// danach bekommt die neue Spalte ein Drittel der Bildschirmbreite und der Streifen wächst.
++    fn append_to_strip(
++        tree: &mut Tree<Data>,
++        new_window: Node<Data>,
++        focused: Option<&NodeId>,
++        zone_w: i32,
++    ) -> NodeId {
++        let root_id = tree.root_node_id().cloned().unwrap();
++
++        if !tree.get(&root_id).unwrap().data().is_strip() {
++            // noch kein Streifen: alte Wurzel und neues Fenster nebeneinander
++            let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
++            TilingLayout::new_group(tree, &root_id, &new_id, Orientation::Vertical).unwrap();
++            return new_id;
++        }
++
++        // die Spalte (direktes Kind der Wurzel), in der das aktive Fenster steckt
++        let count = tree.children_ids(&root_id).unwrap().count();
++        let idx = focused
++            .filter(|id| tree.get(id).is_ok())
++            .and_then(|id| {
++                let mut column = id.clone();
++                while let Some(parent) = tree.get(&column).unwrap().parent().cloned() {
++                    if parent == root_id {
++                        break;
++                    }
++                    column = parent;
++                }
++                tree.children_ids(&root_id)
++                    .unwrap()
++                    .position(|child| child == &column)
++            })
++            .map(|pos| pos + 1)
++            .unwrap_or(count);
++
++        let column_w = (zone_w / STRIP_COLUMNS_PER_SCREEN).max(360);
++        let data = tree.get_mut(&root_id).unwrap().data_mut();
++        let fits = match data {
++            Data::Group { sizes, .. } => {
++                sizes.iter().sum::<i32>() <= zone_w
++                    && (count as i32) < STRIP_COLUMNS_PER_SCREEN
++            }
++            _ => false,
++        };
++        if fits {
++            data.add_window(idx);
++        } else if let Data::Group { sizes, .. } = data {
++            sizes.insert(idx, column_w);
++        }
++
++        let new_id = tree
++            .insert(new_window, InsertBehavior::UnderNode(&root_id))
++            .unwrap();
++        tree.make_nth_sibling(&new_id, idx).unwrap();
++        new_id
++    }
++
++    /// Sichtbare Fläche für Fenster: nicht-exklusive Zone abzüglich äußerer Abstände.
++    fn strip_viewport(&self) -> Rectangle<i32, Local> {
++        let (outer, _) = self.gaps();
++        let mut geo = layer_map_for_output(&self.output)
++            .non_exclusive_zone()
++            .as_local();
++        geo.loc.x += outer;
++        geo.loc.y += outer;
++        geo.size.w -= outer * 2;
++        geo.size.h -= outer * 2;
++        geo
++    }
++
++    /// Fläche, auf der der Baum angeordnet wird: so breit wie die Spalten zusammen,
++    /// mindestens `viewport`, und um den aktuellen Versatz nach links geschoben.
++    /// Der Versatz wird aus der bisherigen Lage der Wurzel gelesen.
++    fn strip_area(
++        tree: &mut Tree<Data>,
++        root_id: &NodeId,
++        viewport: Rectangle<i32, Local>,
++    ) -> Rectangle<i32, Local> {
++        let data = tree.get_mut(root_id).unwrap().data_mut();
++        let Data::Group {
++            orientation: Orientation::Vertical,
++            sizes,
++            last_geometry,
++            ..
++        } = data
++        else {
++            return viewport;
++        };
++
++        let content_w: i32 = sizes.iter().sum();
++        let previous_x = last_geometry.loc.x;
++        // `update_geometry` skaliert von der alten Länge auf die neue: die alte Länge
++        // muss darum die tatsächliche Summe sein, damit nur bei Bedarf aufgefüllt wird.
++        last_geometry.size.w = content_w;
++
++        let width = content_w.max(viewport.size.w);
++        let scroll = (viewport.loc.x - previous_x).clamp(0, width - viewport.size.w);
++        Rectangle::new(
++            (viewport.loc.x - scroll, viewport.loc.y).into(),
++            (width, viewport.size.h).into(),
++        )
++    }
++
++    /// Aktueller Versatz und größtmöglicher Versatz des Streifens im neuesten Baum.
++    fn strip_scroll_state(&self) -> Option<(i32, i32)> {
++        let viewport = self.strip_viewport();
++        let tree = &self.queue.trees.back().unwrap().0;
++        let root = tree.get(tree.root_node_id()?).ok()?;
++        if !root.data().is_strip() {
++            return None;
++        }
++        let geo = root.data().geometry();
++        let current = viewport.loc.x - geo.loc.x;
++        let max = (geo.size.w - viewport.size.w).max(0);
++        Some((current, max))
++    }
++
++    /// Verschiebt alle Knoten eines Baums waagerecht. Mit `apply` bekommen die Fenster
++    /// ihre neue Lage auch mitgeteilt (nur Lage, die Größe bleibt).
++    fn shift_tree(tree: &mut Tree<Data>, output: &Output, dx: i32, apply: bool) {
++        let Some(root_id) = tree.root_node_id().cloned() else {
++            return;
++        };
++        let ids = tree
++            .traverse_pre_order_ids(&root_id)
++            .unwrap()
++            .collect::<Vec<_>>();
++        for id in ids {
++            match tree.get_mut(&id).unwrap().data_mut() {
++                Data::Group { last_geometry, .. } | Data::Placeholder { last_geometry, .. } => {
++                    last_geometry.loc.x += dx;
++                }
++                Data::Mapped {
++                    mapped,
++                    last_geometry,
++                    ..
++                } => {
++                    last_geometry.loc.x += dx;
++                    if apply && !(mapped.is_fullscreen(true) || mapped.is_maximized(true)) {
++                        mapped.set_geometry(last_geometry.to_global(output));
++                        let _ = mapped.configure();
++                    }
++                }
++            }
++        }
++    }
++
++    /// Scrollt den Ausschnitt um `dx` Pixel (positiv = nach rechts). Wirkt sofort auf alle
++    /// Bäume der Warteschlange, damit laufende Animationen das Scrollen nicht aufhalten.
++    pub fn scroll_strip(&mut self, dx: i32) -> bool {
++        let Some((current, max)) = self.strip_scroll_state() else {
++            return false;
++        };
++        let target = (current + dx).clamp(0, max);
++        let shift = current - target;
++        if shift == 0 {
++            return false;
++        }
++        let output = self.output.clone();
++        let last = self.queue.trees.len() - 1;
++        for (i, (tree, _, _)) in self.queue.trees.iter_mut().enumerate() {
++            TilingLayout::shift_tree(tree, &output, shift, i == last);
++        }
++        true
++    }
++
++    /// Scrollt so wenig wie möglich, damit `rect` ganz sichtbar ist. Ist `rect` breiter als
++    /// der Bildschirm, wird es links bündig gezeigt.
++    pub fn scroll_strip_to_show(&mut self, rect: Rectangle<i32, Local>) -> bool {
++        let viewport = self.strip_viewport();
++        let dx = if rect.loc.x < viewport.loc.x || rect.size.w >= viewport.size.w {
++            rect.loc.x - viewport.loc.x
++        } else if rect.loc.x + rect.size.w > viewport.loc.x + viewport.size.w {
++            rect.loc.x + rect.size.w - (viewport.loc.x + viewport.size.w)
++        } else {
++            0
++        };
++        dx != 0 && self.scroll_strip(dx)
++    }
++
++    pub fn scroll_strip_to_window(&mut self, mapped: &CosmicMapped) -> bool {
++        let Some(mut geo) = self.element_geometry(mapped) else {
++            return false;
++        };
++        let (_, inner) = self.gaps();
++        geo.loc.x -= inner;
++        geo.size.w += inner * 2;
++        self.scroll_strip_to_show(geo)
++    }
++
++    /// Hält den rechten Rand des Streifens sichtbar (beim Verbreitern am Außenrand).
++    pub fn scroll_strip_to_end(&mut self) -> bool {
++        let tree = &self.queue.trees.back().unwrap().0;
++        let Some(geo) = tree
++            .root_node_id()
++            .and_then(|id| tree.get(id).ok())
++            .map(|node| *node.data().geometry())
++        else {
++            return false;
++        };
++        self.scroll_strip_to_show(Rectangle::new(
++            (geo.loc.x + geo.size.w - 1, geo.loc.y).into(),
++            (1, geo.size.h).into(),
++        ))
++    }
++
++    /// Breite der sichtbaren Fläche, für die Schrittweite beim Scrollen.
++    pub fn strip_viewport_width(&self) -> i32 {
++        self.strip_viewport().size.w
++    }
++
++    /// Fläche für die Darstellung: wie `zone`, aber so breit und so verschoben wie der Streifen.
++    fn strip_zone(&self, zone: Rectangle<i32, Local>) -> Rectangle<i32, Local> {
++        let tree = &self.queue.trees.back().unwrap().0;
++        TilingLayout::strip_zone_for(tree, self.gaps().0, zone)
++    }
++
++    fn strip_zone_for(
++        tree: &Tree<Data>,
++        outer: i32,
++        zone: Rectangle<i32, Local>,
++    ) -> Rectangle<i32, Local> {
++        match tree.root_node_id().and_then(|id| tree.get(id).ok()) {
++            Some(root) if root.data().is_strip() => {
++                let geo = root.data().geometry();
++                Rectangle::new(
++                    (geo.loc.x - outer, zone.loc.y).into(),
++                    (geo.size.w + outer * 2, zone.size.h).into(),
++                )
++            }
++            _ => zone,
++        }
++    }
++
+     pub fn replace_window(&mut self, old: &CosmicMapped, new: &CosmicMapped) {
+         let gaps = self.gaps();
+         let Some(old_id) = old.tiling_node_id.lock().unwrap().clone() else {
+@@ -1468,7 +1739,11 @@ impl TilingLayout {
+             assert!(group.is_group());
+ 
+             if group.len() > 2 {
+-                group.remove_window(position);
++                if parent_parent_id.is_none() && group.is_strip() {
++                    group.remove_window_from_strip(position);
++                } else {
++                    group.remove_window(position);
++                }
+             } else {
+                 trace!("Removing Group");
+                 let other_child = tree.children_ids(&id).unwrap().next().cloned().unwrap();
+@@ -2496,6 +2771,13 @@ impl TilingLayout {
+                 if node_idx < total - 1 && edge.contains(ResizeEdge::RIGHT) {
+                     return Some((group_id, node_idx, orientation));
+                 }
++                // Außenrand des Streifens: die letzte Spalte wächst, der Streifen mit ihr
++                if node_idx == total - 1
++                    && edge.contains(ResizeEdge::RIGHT)
++                    && tree.get(&group_id).unwrap().parent().is_none()
++                {
++                    return Some((group_id, node_idx, orientation));
++                }
+             } else {
+                 if node_idx > 0 && edge.contains(ResizeEdge::TOP) {
+                     return Some((group_id, node_idx - 1, orientation));
+@@ -2565,6 +2847,27 @@ impl TilingLayout {
+                     }
+                 }
+             }) else {
++                // Außenrand des Streifens: letzte Spalte breiter oder schmaler machen
++                let is_strip_end = orientation == Orientation::Vertical
++                    && edges.contains(ResizeEdge::RIGHT)
++                    && tree.get(&group_id).unwrap().parent().is_none();
++                if is_strip_end {
++                    let viewport_w = self.strip_viewport().size.w;
++                    if let Data::Group { sizes, .. } = tree.get_mut(&group_id).unwrap().data_mut()
++                    {
++                        let others: i32 = sizes.iter().sum::<i32>() - sizes[node_idx];
++                        let min = (viewport_w - others).max(360);
++                        sizes[node_idx] = if direction == ResizeDirection::Inwards {
++                            (sizes[node_idx] - amount).max(min)
++                        } else {
++                            sizes[node_idx] + amount
++                        };
++                    }
++                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
++                    self.queue.push_tree(tree, None, blocker);
++                    self.scroll_strip_to_end();
++                    return true;
++                }
+                 node_id = group_id.clone();
+                 continue;
+             };
+@@ -3000,7 +3303,7 @@ impl TilingLayout {
+         tree: &mut Tree<Data>,
+         gaps: (i32, i32),
+     ) -> Option<TilingBlocker> {
+-        if let Some(root_id) = tree.root_node_id() {
++        if let Some(root_id) = tree.root_node_id().cloned() {
+             let mut configures = Vec::new();
+ 
+             let (outer, inner) = gaps;
+@@ -3009,10 +3312,11 @@ impl TilingLayout {
+             geo.loc.y += outer;
+             geo.size.w -= outer * 2;
+             geo.size.h -= outer * 2;
++            let geo = TilingLayout::strip_area(tree, &root_id, geo);
+             let mut stack = vec![geo];
+ 
+             for node_id in tree
+-                .traverse_pre_order_ids(root_id)
++                .traverse_pre_order_ids(&root_id)
+                 .unwrap()
+                 .collect::<Vec<_>>()
+                 .into_iter()
+@@ -3429,9 +3733,13 @@ impl TilingLayout {
+             overview.active_trigger(),
+             Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
+         ) {
+-            let non_exclusive_zone = layer_map_for_output(&self.output)
+-                .non_exclusive_zone()
+-                .as_local();
++            let non_exclusive_zone = TilingLayout::strip_zone_for(
++                tree,
++                gaps.0,
++                layer_map_for_output(&self.output)
++                    .non_exclusive_zone()
++                    .as_local(),
++            );
+             let geometries = geometries_for_groupview(
+                 tree,
+                 Option::<&mut GlowRenderer>::None,
+@@ -4043,6 +4351,7 @@ impl TilingLayout {
+     {
+         let output_scale = self.output.current_scale().fractional_scale();
+ 
++        let non_exclusive_zone = self.strip_zone(non_exclusive_zone);
+         let (target_tree, duration, _) = if self.queue.animation_start.is_some() {
+             self.queue
+                 .trees
+@@ -4209,6 +4518,7 @@ impl TilingLayout {
+     {
+         let output_scale = self.output.current_scale().fractional_scale();
+ 
++        let non_exclusive_zone = self.strip_zone(non_exclusive_zone);
+         let (target_tree, duration, _) = if self.queue.animation_start.is_some() {
+             self.queue
+                 .trees
+diff --git a/src/shell/mod.rs b/src/shell/mod.rs
+index 108307b1..5c5fc5f9 100644
+--- a/src/shell/mod.rs
++++ b/src/shell/mod.rs
+@@ -1932,6 +1932,30 @@ impl Shell {
+         self.workspaces.active_mut(output)
+     }
+ 
++    /// Scroll-Streifen: Ausschnitt der aktiven Arbeitsfläche auf `output` um `dx` verschieben.
++    pub fn scroll_strip(&mut self, output: &Output, dx: i32) -> bool {
++        self.active_space_mut(output)
++            .is_some_and(|ws| ws.tiling_layer.scroll_strip(dx))
++    }
++
++    pub fn strip_viewport_width(&self, output: &Output) -> i32 {
++        self.active_space(output)
++            .map(|ws| ws.tiling_layer.strip_viewport_width())
++            .unwrap_or(0)
++    }
++
++    /// Scroll-Streifen: das Fenster mit Tastaturfokus ganz in den Ausschnitt holen.
++    pub fn scroll_strip_to_focus(&mut self, seat: &Seat<State>) {
++        let Some(KeyboardFocusTarget::Element(mapped)) =
++            seat.get_keyboard().and_then(|keyboard| keyboard.current_focus())
++        else {
++            return;
++        };
++        if let Some(ws) = self.space_for_mut(&mapped) {
++            ws.tiling_layer.scroll_strip_to_window(&mapped);
++        }
++    }
++
+     /// get the parent output of the window which has keyboard focus (for a given seat)
+     pub fn get_output_for_focus(&self, seat: &Seat<State>) -> Option<Output> {
+         let mut focus_target = seat.get_keyboard().unwrap().current_focus()?;
