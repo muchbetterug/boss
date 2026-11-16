@@ -197,7 +197,7 @@ index c6f202cf..ae1dd708 100644
              } else {
                  return true;
 diff --git a/src/shell/layout/tiling/mod.rs b/src/shell/layout/tiling/mod.rs
-index 20e11b71..ca8d9e71 100644
+index 20e11b71..f2e4595e 100644
 --- a/src/shell/layout/tiling/mod.rs
 +++ b/src/shell/layout/tiling/mod.rs
 @@ -84,6 +84,44 @@ pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
@@ -328,7 +328,7 @@ index 20e11b71..ca8d9e71 100644
          } else if let Some(ref node_id) = node {
              let orientation = {
                  let window_size = tree.get(node_id).unwrap().data().geometry().size;
-@@ -615,6 +685,344 @@ impl TilingLayout {
+@@ -615,6 +685,371 @@ impl TilingLayout {
          *window.tiling_node_id.lock().unwrap() = Some(window_id);
      }
  
@@ -431,25 +431,52 @@ index 20e11b71..ca8d9e71 100644
 +        last_geometry.size.w = content_w;
 +
 +        let width = content_w.max(viewport.size.w);
-+        let scroll = (viewport.loc.x - previous_x).clamp(0, width - viewport.size.w);
++        // so breit, wie die Spalten nach dem Auffüllen sein werden
++        let scale = |w: i32| (w as i64 * width as i64 / content_w.max(1) as i64) as i32;
++        let (min, max) = TilingLayout::strip_bounds(
++            scale(sizes.first().copied().unwrap_or(0)),
++            scale(sizes.last().copied().unwrap_or(0)),
++            width,
++            viewport.size.w,
++        );
++        let scroll = (viewport.loc.x - previous_x).clamp(min, max);
 +        Rectangle::new(
 +            (viewport.loc.x - scroll, viewport.loc.y).into(),
 +            (width, viewport.size.h).into(),
 +        )
 +    }
 +
-+    /// Aktueller Versatz und größtmöglicher Versatz des Streifens im neuesten Baum.
-+    fn strip_scroll_state(&self) -> Option<(i32, i32)> {
++    /// Grenzen des Versatzes: Der Streifen lässt sich immer verschieben, auch wenn die
++    /// Spalten den Bildschirm nicht füllen - nach rechts, bis die erste Spalte am rechten
++    /// Rand steht, nach links, bis die letzte Spalte am linken Rand steht.
++    fn strip_bounds(first_w: i32, last_w: i32, width: i32, viewport_w: i32) -> (i32, i32) {
++        let min = (first_w.min(viewport_w) - viewport_w).min(0);
++        let max = (width - last_w.min(viewport_w)).max(0);
++        (min, max)
++    }
++
++    /// Aktueller Versatz und seine Grenzen im neuesten Baum: (aktuell, kleinster, größter).
++    fn strip_scroll_state(&self) -> Option<(i32, i32, i32)> {
 +        let viewport = self.strip_viewport();
 +        let tree = &self.queue.trees.back().unwrap().0;
 +        let root = tree.get(tree.root_node_id()?).ok()?;
-+        if !root.data().is_strip() {
++        let Data::Group {
++            orientation: Orientation::Vertical,
++            sizes,
++            last_geometry: geo,
++            ..
++        } = root.data()
++        else {
 +            return None;
-+        }
-+        let geo = root.data().geometry();
++        };
 +        let current = viewport.loc.x - geo.loc.x;
-+        let max = (geo.size.w - viewport.size.w).max(0);
-+        Some((current, max))
++        let (min, max) = TilingLayout::strip_bounds(
++            sizes.first().copied().unwrap_or(0),
++            sizes.last().copied().unwrap_or(0),
++            geo.size.w,
++            viewport.size.w,
++        );
++        Some((current, min, max))
 +    }
 +
 +    /// Verschiebt alle Knoten eines Baums waagerecht. Mit `apply` bekommen die Fenster
@@ -485,10 +512,10 @@ index 20e11b71..ca8d9e71 100644
 +    /// Verschiebt den Ausschnitt um `dx` Pixel (positiv = nach rechts). Wirkt sofort auf alle
 +    /// Bäume der Warteschlange, damit laufende Animationen das Scrollen nicht aufhalten.
 +    fn shift_strip(&mut self, dx: i32) -> bool {
-+        let Some((current, max)) = self.strip_scroll_state() else {
++        let Some((current, min, max)) = self.strip_scroll_state() else {
 +            return false;
 +        };
-+        let target = (current + dx).clamp(0, max);
++        let target = (current + dx).clamp(min, max);
 +        let shift = current - target;
 +        if shift == 0 {
 +            return false;
@@ -553,11 +580,11 @@ index 20e11b71..ca8d9e71 100644
 +        duration: Duration,
 +        easing: StripEasing,
 +    ) -> bool {
-+        let Some((current, max)) = self.strip_scroll_state() else {
++        let Some((current, min, max)) = self.strip_scroll_state() else {
 +            self.strip_animation = None;
 +            return false;
 +        };
-+        let to = (base.unwrap_or(current as f64) + dx).clamp(0.0, max as f64);
++        let to = (base.unwrap_or(current as f64) + dx).clamp(min as f64, max as f64);
 +        if (to - current as f64).abs() < 1.0 {
 +            self.strip_animation = None;
 +            return false;
@@ -582,7 +609,7 @@ index 20e11b71..ca8d9e71 100644
 +        let eased = animation.easing.apply(t);
 +        let target = animation.from + (animation.to - animation.from) * eased;
 +        match self.strip_scroll_state() {
-+            Some((current, _)) => {
++            Some((current, _, _)) => {
 +                let dx = target.round() as i32 - current;
 +                if dx != 0 {
 +                    self.shift_strip(dx);
@@ -673,7 +700,7 @@ index 20e11b71..ca8d9e71 100644
      pub fn replace_window(&mut self, old: &CosmicMapped, new: &CosmicMapped) {
          let gaps = self.gaps();
          let Some(old_id) = old.tiling_node_id.lock().unwrap().clone() else {
-@@ -1468,7 +1876,11 @@ impl TilingLayout {
+@@ -1468,7 +1903,11 @@ impl TilingLayout {
              assert!(group.is_group());
  
              if group.len() > 2 {
@@ -686,7 +713,7 @@ index 20e11b71..ca8d9e71 100644
              } else {
                  trace!("Removing Group");
                  let other_child = tree.children_ids(&id).unwrap().next().cloned().unwrap();
-@@ -2357,10 +2769,11 @@ impl TilingLayout {
+@@ -2357,10 +2796,11 @@ impl TilingLayout {
      }
  
      pub fn animations_going(&self) -> bool {
@@ -699,7 +726,7 @@ index 20e11b71..ca8d9e71 100644
          let mut clients = HashMap::new();
          let mut ready_trees = 0;
          for (_, _, blocker) in self.queue.trees.iter().skip(1) {
-@@ -2496,6 +2909,13 @@ impl TilingLayout {
+@@ -2496,6 +2936,13 @@ impl TilingLayout {
                  if node_idx < total - 1 && edge.contains(ResizeEdge::RIGHT) {
                      return Some((group_id, node_idx, orientation));
                  }
@@ -713,7 +740,7 @@ index 20e11b71..ca8d9e71 100644
              } else {
                  if node_idx > 0 && edge.contains(ResizeEdge::TOP) {
                      return Some((group_id, node_idx - 1, orientation));
-@@ -2565,6 +2985,27 @@ impl TilingLayout {
+@@ -2565,6 +3012,27 @@ impl TilingLayout {
                      }
                  }
              }) else {
@@ -741,7 +768,7 @@ index 20e11b71..ca8d9e71 100644
                  node_id = group_id.clone();
                  continue;
              };
-@@ -3000,7 +3441,7 @@ impl TilingLayout {
+@@ -3000,7 +3468,7 @@ impl TilingLayout {
          tree: &mut Tree<Data>,
          gaps: (i32, i32),
      ) -> Option<TilingBlocker> {
@@ -750,7 +777,7 @@ index 20e11b71..ca8d9e71 100644
              let mut configures = Vec::new();
  
              let (outer, inner) = gaps;
-@@ -3009,10 +3450,11 @@ impl TilingLayout {
+@@ -3009,10 +3477,11 @@ impl TilingLayout {
              geo.loc.y += outer;
              geo.size.w -= outer * 2;
              geo.size.h -= outer * 2;
@@ -763,7 +790,7 @@ index 20e11b71..ca8d9e71 100644
                  .unwrap()
                  .collect::<Vec<_>>()
                  .into_iter()
-@@ -3429,9 +3871,13 @@ impl TilingLayout {
+@@ -3429,9 +3898,13 @@ impl TilingLayout {
              overview.active_trigger(),
              Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
          ) {
@@ -780,7 +807,7 @@ index 20e11b71..ca8d9e71 100644
              let geometries = geometries_for_groupview(
                  tree,
                  Option::<&mut GlowRenderer>::None,
-@@ -4043,6 +4489,7 @@ impl TilingLayout {
+@@ -4043,6 +4516,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
@@ -788,7 +815,7 @@ index 20e11b71..ca8d9e71 100644
          let (target_tree, duration, _) = if self.queue.animation_start.is_some() {
              self.queue
                  .trees
-@@ -4209,6 +4656,7 @@ impl TilingLayout {
+@@ -4209,6 +4683,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
