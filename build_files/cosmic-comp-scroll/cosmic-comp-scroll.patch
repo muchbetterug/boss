@@ -45,22 +45,24 @@ index 6c9c2f38..c6beb4dd 100644
  
  #[derive(Debug, Clone)]
 diff --git a/src/input/mod.rs b/src/input/mod.rs
-index d51dd8a6..0d5b66cd 100644
+index d51dd8a6..e3fc17ed 100644
 --- a/src/input/mod.rs
 +++ b/src/input/mod.rs
-@@ -97,6 +97,11 @@ pub mod actions;
+@@ -97,6 +97,13 @@ pub mod actions;
  pub mod gestures;
  pub mod tablet_emu;
  
 +/// Scroll-Streifen: Anteil der Bildschirmbreite je Rastung des Mausrads
-+const STRIP_WHEEL_STEP: f64 = 0.1;
++const STRIP_WHEEL_STEP: f64 = 0.04;
++/// Scroll-Streifen: kleinste Weite einer Rastung in Pixeln (schmale Bildschirme)
++const STRIP_WHEEL_STEP_MIN: f64 = 120.0;
 +/// Scroll-Streifen: Verstärkung für Touchpad-Bewegungen
 +const STRIP_TOUCHPAD_FACTOR: f64 = 2.0;
 +
  /// Identifies the input backend instance an event came from, used to disambiguate device ids
  /// (which are only unique within a single backend instance, see
  /// [`smithay::backend::input::Device::id`]).
-@@ -1117,7 +1122,35 @@ impl State {
+@@ -1117,7 +1124,46 @@ impl State {
                      self.common.idle_notifier_state.notify_activity(&seat);
                      notify_cursor_activity(self, &seat, PointerEventKind::Other);
  
@@ -73,12 +75,18 @@ index d51dd8a6..0d5b66cd 100644
 +                        let output = seat.active_output();
 +                        let viewport_w =
 +                            self.common.shell.read().strip_viewport_width(&output) as f64;
++                        let wheel =
++                            matches!(event.source(), AxisSource::Wheel | AxisSource::WheelTilt);
 +                        let mut dx = 0.0;
 +                        for axis in [Axis::Vertical, Axis::Horizontal] {
 +                            let mut amount = match event.source() {
 +                                AxisSource::Wheel | AxisSource::WheelTilt => event
 +                                    .amount_v120(axis)
-+                                    .map(|v| v / 120. * viewport_w * STRIP_WHEEL_STEP),
++                                    .map(|v| {
++                                        v / 120.
++                                            * (viewport_w * STRIP_WHEEL_STEP)
++                                                .max(STRIP_WHEEL_STEP_MIN)
++                                    }),
 +                                _ => event.amount(axis).map(|v| v * STRIP_TOUCHPAD_FACTOR),
 +                            }
 +                            .unwrap_or(0.0);
@@ -87,17 +95,22 @@ index d51dd8a6..0d5b66cd 100644
 +                            }
 +                            dx += amount * scroll_factor;
 +                        }
-+                        if dx != 0.0 {
-+                            self.common
-+                                .shell
-+                                .write()
-+                                .scroll_strip(&output, dx.round() as i32);
++                        let mut shell = self.common.shell.write();
++                        if wheel {
++                            if dx != 0.0 {
++                                shell.scroll_strip_smooth(&output, dx.round() as i32);
++                            }
++                        } else if dx != 0.0 {
++                            shell.scroll_strip(&output, dx.round() as i32);
++                        } else if event.source() == AxisSource::Finger {
++                            // Finger vom Touchpad genommen
++                            shell.fling_strip(&output);
 +                        }
 +                    } else if modifiers.logo
                          && self
                              .common
                              .config
-@@ -1248,7 +1281,12 @@ impl State {
+@@ -1248,7 +1294,12 @@ impl State {
                                  natural_scroll = natural;
                              }
                              activate_action = match gesture_state.fingers {
@@ -111,7 +124,7 @@ index d51dd8a6..0d5b66cd 100644
                                  4 => {
                                      if self.common.config.cosmic_conf.workspaces.workspace_layout
                                          == WorkspaceLayout::Horizontal
-@@ -1305,6 +1343,14 @@ impl State {
+@@ -1305,6 +1356,14 @@ impl State {
                                      matches!(x, SwipeAction::NextWorkspace),
                                  )
                              }
@@ -126,6 +139,19 @@ index d51dd8a6..0d5b66cd 100644
                              _ => {}
                          }
                      } else {
+@@ -1351,6 +1410,12 @@ impl State {
+                                     &mut self.common.workspace_state.update(),
+                                 );
+                             }
++                            Some(SwipeAction::ScrollStrip) => {
++                                self.common
++                                    .shell
++                                    .write()
++                                    .fling_strip(&seat.active_output());
++                            }
+                             _ => {}
+                         }
+                         self.common.gesture_state = None;
 diff --git a/src/shell/layout/tiling/grabs/resize.rs b/src/shell/layout/tiling/grabs/resize.rs
 index c6f202cf..ae1dd708 100644
 --- a/src/shell/layout/tiling/grabs/resize.rs
@@ -171,10 +197,10 @@ index c6f202cf..ae1dd708 100644
              } else {
                  return true;
 diff --git a/src/shell/layout/tiling/mod.rs b/src/shell/layout/tiling/mod.rs
-index 20e11b71..ea23a369 100644
+index 20e11b71..ca8d9e71 100644
 --- a/src/shell/layout/tiling/mod.rs
 +++ b/src/shell/layout/tiling/mod.rs
-@@ -84,6 +84,13 @@ pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+@@ -84,6 +84,44 @@ pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
  pub const MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(150);
  pub const INITIAL_MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(500);
  
@@ -184,11 +210,52 @@ index 20e11b71..ea23a369 100644
 +// x-Position der Wurzel und braucht darum keinen eigenen Zustand.
 +/// So viele Spalten teilen sich den Bildschirm, bevor neue Fenster angehängt werden.
 +pub const STRIP_COLUMNS_PER_SCREEN: i32 = 3;
++/// Dauer eines weichen Scrollschritts (Mausrad, Mitscrollen zum Fenster).
++const STRIP_SCROLL_DURATION: Duration = Duration::from_millis(260);
++/// Ausgleiten nach dem Loslassen des Touchpads: Weg = Geschwindigkeit × diese Zeit (s).
++const STRIP_FLING_TAU: f64 = 0.3;
++
++/// Laufende weiche Bewegung des Ausschnitts, Versatz in Pixeln.
++#[derive(Debug, Clone)]
++struct StripAnimation {
++    from: f64,
++    to: f64,
++    start: Instant,
++    duration: Duration,
++    easing: StripEasing,
++}
++
++#[derive(Debug, Clone, Copy)]
++enum StripEasing {
++    /// sanft anlaufend und auslaufend (Sinus): Mausrad, Mitscrollen
++    Gentle,
++    /// kubisch auslaufend, beginnt genau mit der Fingergeschwindigkeit: Ausgleiten
++    Fling,
++}
++
++impl StripEasing {
++    fn apply(self, t: f64) -> f64 {
++        match self {
++            StripEasing::Gentle => (t * std::f64::consts::FRAC_PI_2).sin(),
++            StripEasing::Fling => 1.0 - (1.0 - t).powi(3),
++        }
++    }
++}
 +
  #[derive(Debug, Clone, PartialEq)]
  pub struct NodeDesc {
      pub handle: WorkspaceHandle,
-@@ -281,6 +288,27 @@ impl Data {
+@@ -136,6 +174,9 @@ pub struct TilingLayout {
+     backdrop_id: Id,
+     swapping_stack_surface_id: Id,
+     last_overview_hover: Option<(Option<Instant>, TargetZone)>,
++    strip_animation: Option<StripAnimation>,
++    /// zuletzt gemessene Scrollgeschwindigkeit (Pixel/s) für das Ausgleiten
++    strip_velocity: Option<(Instant, f64)>,
+     pub theme: cosmic::Theme,
+     pub appearance: AppearanceConfig,
+ }
+@@ -281,6 +322,27 @@ impl Data {
          }
      }
  
@@ -216,7 +283,16 @@ index 20e11b71..ea23a369 100644
      fn geometry(&self) -> &Rectangle<i32, Local> {
          match self {
              Data::Group { last_geometry, .. } => last_geometry,
-@@ -412,6 +440,7 @@ impl TilingLayout {
+@@ -367,6 +429,8 @@ impl TilingLayout {
+             backdrop_id: Id::new(),
+             swapping_stack_surface_id: Id::new(),
+             last_overview_hover: None,
++            strip_animation: None,
++            strip_velocity: None,
+             theme,
+             appearance,
+         }
+@@ -412,6 +476,7 @@ impl TilingLayout {
          minimize_rect: Option<Rectangle<i32, Local>>,
      ) {
          let gaps = self.gaps();
@@ -224,7 +300,7 @@ index 20e11b71..ea23a369 100644
  
          let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
          let last_active = focus_stack
-@@ -425,7 +454,7 @@ impl TilingLayout {
+@@ -425,7 +490,7 @@ impl TilingLayout {
  
          TilingLayout::map_to_tree(
              &mut tree,
@@ -233,7 +309,7 @@ index 20e11b71..ea23a369 100644
              &self.output,
              last_active,
              direction,
-@@ -433,6 +462,7 @@ impl TilingLayout {
+@@ -433,6 +498,7 @@ impl TilingLayout {
          );
          let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
          self.queue.push_tree(tree, duration, blocker);
@@ -241,7 +317,7 @@ index 20e11b71..ea23a369 100644
      }
  
      pub fn remap<'a>(
-@@ -581,6 +611,10 @@ impl TilingLayout {
+@@ -581,6 +647,10 @@ impl TilingLayout {
              } else {
                  tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
              }
@@ -252,7 +328,7 @@ index 20e11b71..ea23a369 100644
          } else if let Some(ref node_id) = node {
              let orientation = {
                  let window_size = tree.get(node_id).unwrap().data().geometry().size;
-@@ -615,6 +649,243 @@ impl TilingLayout {
+@@ -615,6 +685,344 @@ impl TilingLayout {
          *window.tiling_node_id.lock().unwrap() = Some(window_id);
      }
  
@@ -406,9 +482,9 @@ index 20e11b71..ea23a369 100644
 +        }
 +    }
 +
-+    /// Scrollt den Ausschnitt um `dx` Pixel (positiv = nach rechts). Wirkt sofort auf alle
++    /// Verschiebt den Ausschnitt um `dx` Pixel (positiv = nach rechts). Wirkt sofort auf alle
 +    /// Bäume der Warteschlange, damit laufende Animationen das Scrollen nicht aufhalten.
-+    pub fn scroll_strip(&mut self, dx: i32) -> bool {
++    fn shift_strip(&mut self, dx: i32) -> bool {
 +        let Some((current, max)) = self.strip_scroll_state() else {
 +            return false;
 +        };
@@ -425,18 +501,116 @@ index 20e11b71..ea23a369 100644
 +        true
 +    }
 +
-+    /// Scrollt so wenig wie möglich, damit `rect` ganz sichtbar ist. Ist `rect` breiter als
-+    /// der Bildschirm, wird es links bündig gezeigt.
++    /// Folgt direkt den Fingern (Touchpad, Wischgeste) und merkt sich die Geschwindigkeit
++    /// für das Ausgleiten nach dem Loslassen.
++    pub fn scroll_strip(&mut self, dx: i32) -> bool {
++        self.strip_animation = None;
++        let now = Instant::now();
++        let velocity = match self.strip_velocity {
++            Some((last, v)) => {
++                let dt = now.duration_since(last).as_secs_f64();
++                if dt > 0.1 {
++                    0.0
++                } else {
++                    let measured = (dx as f64 / dt.max(0.004)).clamp(-30000.0, 30000.0);
++                    0.5 * measured + 0.5 * v
++                }
++            }
++            None => 0.0,
++        };
++        self.strip_velocity = Some((now, velocity));
++        self.shift_strip(dx)
++    }
++
++    /// Weicher Scrollschritt (Mausrad). Mehrere Schritte hintereinander addieren sich
++    /// zum Ziel der laufenden Bewegung.
++    pub fn scroll_strip_smooth(&mut self, dx: i32) -> bool {
++        self.strip_velocity = None;
++        let base = self.strip_animation.as_ref().map(|a| a.to);
++        self.animate_strip(base, dx as f64, STRIP_SCROLL_DURATION, StripEasing::Gentle)
++    }
++
++    /// Nach dem Loslassen mit der zuletzt gemessenen Geschwindigkeit ausgleiten.
++    pub fn fling_strip(&mut self) -> bool {
++        let Some((last, velocity)) = self.strip_velocity.take() else {
++            return false;
++        };
++        if last.elapsed() > Duration::from_millis(80) || velocity.abs() < 200.0 {
++            return false;
++        }
++        self.animate_strip(
++            None,
++            velocity * STRIP_FLING_TAU,
++            Duration::from_secs_f64(STRIP_FLING_TAU * 3.0),
++            StripEasing::Fling,
++        )
++    }
++
++    fn animate_strip(
++        &mut self,
++        base: Option<f64>,
++        dx: f64,
++        duration: Duration,
++        easing: StripEasing,
++    ) -> bool {
++        let Some((current, max)) = self.strip_scroll_state() else {
++            self.strip_animation = None;
++            return false;
++        };
++        let to = (base.unwrap_or(current as f64) + dx).clamp(0.0, max as f64);
++        if (to - current as f64).abs() < 1.0 {
++            self.strip_animation = None;
++            return false;
++        }
++        self.strip_animation = Some(StripAnimation {
++            from: current as f64,
++            to,
++            start: Instant::now(),
++            duration,
++            easing,
++        });
++        true
++    }
++
++    /// Ein Schritt der weichen Bewegung, einmal je Bild.
++    fn step_strip_animation(&mut self) {
++        let Some(animation) = self.strip_animation.clone() else {
++            return;
++        };
++        let t = (animation.start.elapsed().as_secs_f64() / animation.duration.as_secs_f64())
++            .min(1.0);
++        let eased = animation.easing.apply(t);
++        let target = animation.from + (animation.to - animation.from) * eased;
++        match self.strip_scroll_state() {
++            Some((current, _)) => {
++                let dx = target.round() as i32 - current;
++                if dx != 0 {
++                    self.shift_strip(dx);
++                }
++                if t >= 1.0 {
++                    self.strip_animation = None;
++                }
++            }
++            None => self.strip_animation = None,
++        }
++    }
++
++    /// Scrollt so wenig wie möglich, damit `rect` ganz sichtbar ist (weich). Ist `rect` breiter
++    /// als der Bildschirm, wird es links bündig gezeigt.
 +    pub fn scroll_strip_to_show(&mut self, rect: Rectangle<i32, Local>) -> bool {
++        let dx = self.strip_dx_to_show(rect);
++        dx != 0 && self.animate_strip(None, dx as f64, STRIP_SCROLL_DURATION, StripEasing::Gentle)
++    }
++
++    fn strip_dx_to_show(&self, rect: Rectangle<i32, Local>) -> i32 {
 +        let viewport = self.strip_viewport();
-+        let dx = if rect.loc.x < viewport.loc.x || rect.size.w >= viewport.size.w {
++        if rect.loc.x < viewport.loc.x || rect.size.w >= viewport.size.w {
 +            rect.loc.x - viewport.loc.x
 +        } else if rect.loc.x + rect.size.w > viewport.loc.x + viewport.size.w {
 +            rect.loc.x + rect.size.w - (viewport.loc.x + viewport.size.w)
 +        } else {
 +            0
-+        };
-+        dx != 0 && self.scroll_strip(dx)
++        }
 +    }
 +
 +    pub fn scroll_strip_to_window(&mut self, mapped: &CosmicMapped) -> bool {
@@ -449,7 +623,8 @@ index 20e11b71..ea23a369 100644
 +        self.scroll_strip_to_show(geo)
 +    }
 +
-+    /// Hält den rechten Rand des Streifens sichtbar (beim Verbreitern am Außenrand).
++    /// Hält den rechten Rand des Streifens sichtbar (beim Verbreitern am Außenrand). Sofort,
++    /// nicht weich: das Ziehen setzt bei jeder Bewegung neu auf den Baum vom Griffbeginn auf.
 +    pub fn scroll_strip_to_end(&mut self) -> bool {
 +        let tree = &self.queue.trees.back().unwrap().0;
 +        let Some(geo) = tree
@@ -459,10 +634,12 @@ index 20e11b71..ea23a369 100644
 +        else {
 +            return false;
 +        };
-+        self.scroll_strip_to_show(Rectangle::new(
++        self.strip_animation = None;
++        let dx = self.strip_dx_to_show(Rectangle::new(
 +            (geo.loc.x + geo.size.w - 1, geo.loc.y).into(),
 +            (1, geo.size.h).into(),
-+        ))
++        ));
++        dx != 0 && self.shift_strip(dx)
 +    }
 +
 +    /// Breite der sichtbaren Fläche, für die Schrittweite beim Scrollen.
@@ -496,7 +673,7 @@ index 20e11b71..ea23a369 100644
      pub fn replace_window(&mut self, old: &CosmicMapped, new: &CosmicMapped) {
          let gaps = self.gaps();
          let Some(old_id) = old.tiling_node_id.lock().unwrap().clone() else {
-@@ -1468,7 +1739,11 @@ impl TilingLayout {
+@@ -1468,7 +1876,11 @@ impl TilingLayout {
              assert!(group.is_group());
  
              if group.len() > 2 {
@@ -509,7 +686,20 @@ index 20e11b71..ea23a369 100644
              } else {
                  trace!("Removing Group");
                  let other_child = tree.children_ids(&id).unwrap().next().cloned().unwrap();
-@@ -2496,6 +2771,13 @@ impl TilingLayout {
+@@ -2357,10 +2769,11 @@ impl TilingLayout {
+     }
+ 
+     pub fn animations_going(&self) -> bool {
+-        self.queue.animation_start.is_some()
++        self.queue.animation_start.is_some() || self.strip_animation.is_some()
+     }
+ 
+     pub fn update_animation_state(&mut self) -> HashMap<ClientId, Client> {
++        self.step_strip_animation();
+         let mut clients = HashMap::new();
+         let mut ready_trees = 0;
+         for (_, _, blocker) in self.queue.trees.iter().skip(1) {
+@@ -2496,6 +2909,13 @@ impl TilingLayout {
                  if node_idx < total - 1 && edge.contains(ResizeEdge::RIGHT) {
                      return Some((group_id, node_idx, orientation));
                  }
@@ -523,7 +713,7 @@ index 20e11b71..ea23a369 100644
              } else {
                  if node_idx > 0 && edge.contains(ResizeEdge::TOP) {
                      return Some((group_id, node_idx - 1, orientation));
-@@ -2565,6 +2847,27 @@ impl TilingLayout {
+@@ -2565,6 +2985,27 @@ impl TilingLayout {
                      }
                  }
              }) else {
@@ -551,7 +741,7 @@ index 20e11b71..ea23a369 100644
                  node_id = group_id.clone();
                  continue;
              };
-@@ -3000,7 +3303,7 @@ impl TilingLayout {
+@@ -3000,7 +3441,7 @@ impl TilingLayout {
          tree: &mut Tree<Data>,
          gaps: (i32, i32),
      ) -> Option<TilingBlocker> {
@@ -560,7 +750,7 @@ index 20e11b71..ea23a369 100644
              let mut configures = Vec::new();
  
              let (outer, inner) = gaps;
-@@ -3009,10 +3312,11 @@ impl TilingLayout {
+@@ -3009,10 +3450,11 @@ impl TilingLayout {
              geo.loc.y += outer;
              geo.size.w -= outer * 2;
              geo.size.h -= outer * 2;
@@ -573,7 +763,7 @@ index 20e11b71..ea23a369 100644
                  .unwrap()
                  .collect::<Vec<_>>()
                  .into_iter()
-@@ -3429,9 +3733,13 @@ impl TilingLayout {
+@@ -3429,9 +3871,13 @@ impl TilingLayout {
              overview.active_trigger(),
              Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
          ) {
@@ -590,7 +780,7 @@ index 20e11b71..ea23a369 100644
              let geometries = geometries_for_groupview(
                  tree,
                  Option::<&mut GlowRenderer>::None,
-@@ -4043,6 +4351,7 @@ impl TilingLayout {
+@@ -4043,6 +4489,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
@@ -598,7 +788,7 @@ index 20e11b71..ea23a369 100644
          let (target_tree, duration, _) = if self.queue.animation_start.is_some() {
              self.queue
                  .trees
-@@ -4209,6 +4518,7 @@ impl TilingLayout {
+@@ -4209,6 +4656,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
@@ -607,10 +797,10 @@ index 20e11b71..ea23a369 100644
              self.queue
                  .trees
 diff --git a/src/shell/mod.rs b/src/shell/mod.rs
-index 108307b1..5c5fc5f9 100644
+index 108307b1..9077300a 100644
 --- a/src/shell/mod.rs
 +++ b/src/shell/mod.rs
-@@ -1932,6 +1932,30 @@ impl Shell {
+@@ -1932,6 +1932,42 @@ impl Shell {
          self.workspaces.active_mut(output)
      }
  
@@ -618,6 +808,18 @@ index 108307b1..5c5fc5f9 100644
 +    pub fn scroll_strip(&mut self, output: &Output, dx: i32) -> bool {
 +        self.active_space_mut(output)
 +            .is_some_and(|ws| ws.tiling_layer.scroll_strip(dx))
++    }
++
++    /// Scroll-Streifen: weicher Schritt (Mausrad).
++    pub fn scroll_strip_smooth(&mut self, output: &Output, dx: i32) -> bool {
++        self.active_space_mut(output)
++            .is_some_and(|ws| ws.tiling_layer.scroll_strip_smooth(dx))
++    }
++
++    /// Scroll-Streifen: nach dem Loslassen des Touchpads ausgleiten.
++    pub fn fling_strip(&mut self, output: &Output) -> bool {
++        self.active_space_mut(output)
++            .is_some_and(|ws| ws.tiling_layer.fling_strip())
 +    }
 +
 +    pub fn strip_viewport_width(&self, output: &Output) -> i32 {
