@@ -1,5 +1,5 @@
 diff --git a/src/input/actions.rs b/src/input/actions.rs
-index 6015ff85..1c339cb4 100644
+index 6015ff85..d1a31ed4 100644
 --- a/src/input/actions.rs
 +++ b/src/input/actions.rs
 @@ -142,6 +142,7 @@ impl State {
@@ -31,6 +31,37 @@ index 6015ff85..1c339cb4 100644
                          let workspace = shell.active_space(&current_output).unwrap();
                          if let Some(FocusTarget::Window(focused_window)) =
                              workspace.focus_stack.get(seat).last()
+@@ -1050,6 +1054,30 @@ impl State {
+             Action::Spawn(command) => self.spawn_command(command),
+ 
+             x @ Action::ZoomIn | x @ Action::ZoomOut => {
++                // Super +/-: zuerst die Spalte des Fensters im Streifen breiter oder schmaler,
++                // nur ohne gekacheltes Fenster im Fokus bleibt es die Bildschirmlupe.
++                // (Super . und Super , zoomen weiter wie gewohnt.)
++                use smithay::input::keyboard::Keysym;
++                let column_key = pattern.key.is_some_and(|key| {
++                    [
++                        Keysym::plus,
++                        Keysym::minus,
++                        Keysym::equal,
++                        Keysym::KP_Add,
++                        Keysym::KP_Subtract,
++                    ]
++                    .contains(&key)
++                });
++                if column_key
++                    && self
++                        .common
++                        .shell
++                        .write()
++                        .resize_strip_column(seat, matches!(x, Action::ZoomIn))
++                {
++                    return;
++                }
++
+                 let change = {
+                     let increment =
+                         self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
 diff --git a/src/input/gestures/mod.rs b/src/input/gestures/mod.rs
 index 6c9c2f38..c6beb4dd 100644
 --- a/src/input/gestures/mod.rs
@@ -193,7 +224,7 @@ index c6f202cf..3cbcecfb 100644
              } else {
                  return true;
 diff --git a/src/shell/layout/tiling/mod.rs b/src/shell/layout/tiling/mod.rs
-index 20e11b71..6554373b 100644
+index 20e11b71..c53b7da6 100644
 --- a/src/shell/layout/tiling/mod.rs
 +++ b/src/shell/layout/tiling/mod.rs
 @@ -84,6 +84,69 @@ pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
@@ -891,7 +922,94 @@ index 20e11b71..6554373b 100644
                  node_id = group_id.clone();
                  continue;
              };
-@@ -2791,6 +3358,7 @@ impl TilingLayout {
+@@ -2619,6 +3186,86 @@ impl TilingLayout {
+         true
+     }
+ 
++    /// Super +/-: die Spalte des fokussierten Fensters im Streifen in Zwölfteln der
++    /// Bildschirmbreite breiter oder schmaler machen, weich animiert. Die übrigen Spalten
++    /// behalten ihre Breite, nur ihre Lage verschiebt sich.
++    pub fn resize_strip_column(&mut self, focused: &KeyboardFocusTarget, grow: bool) -> bool {
++        let gaps = self.gaps();
++        let viewport_w = self.strip_viewport().size.w;
++
++        let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
++        let Some(root_id) = tree.root_node_id().cloned() else {
++            return false;
++        };
++        if !tree.get(&root_id).unwrap().data().is_strip() {
++            return false;
++        }
++        let Some(mut node_id) = (match TilingLayout::currently_focused_node(&tree, focused.clone())
++        {
++            Some((_id, FocusedNodeData::Window(mapped))) => tree
++                .traverse_pre_order_ids(&root_id)
++                .unwrap()
++                .find(|id| tree.get(id).unwrap().data().is_mapped(Some(&mapped))),
++            Some((id, FocusedNodeData::Group(_, _))) => Some(id),
++            _ => None,
++        }) else {
++            return false;
++        };
++        // bis zur Spalte direkt unter der Wurzel hinauf
++        loop {
++            match tree.get(&node_id).unwrap().parent().cloned() {
++                Some(parent) if parent == root_id => break,
++                Some(parent) => node_id = parent,
++                None => return false,
++            }
++        }
++        let idx = tree
++            .children_ids(&root_id)
++            .unwrap()
++            .position(|id| id == &node_id)
++            .unwrap();
++
++        let step = (viewport_w / 12).max(1);
++        let min = 360.max(step);
++        let changed = match tree.get_mut(&root_id).unwrap().data_mut() {
++            Data::Group { sizes, .. } => {
++                let old = sizes[idx];
++                // auf das nächste Vielfache eines Zwölftels, so dass sich Breiten wie 1/3,
++                // 1/2 oder 2/3 genau treffen lassen
++                let new = if grow {
++                    (old / step + 1) * step
++                } else {
++                    ((old + step - 1) / step - 1) * step
++                }
++                .clamp(min, viewport_w.max(min));
++                sizes[idx] = new;
++                new != old
++            }
++            _ => false,
++        };
++        if !changed {
++            return true;
++        }
++
++        let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
++        self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
++        let column = self
++            .queue
++            .trees
++            .back()
++            .unwrap()
++            .0
++            .get(&node_id)
++            .ok()
++            .map(|node| *node.data().geometry());
++        if let Some(mut geo) = column {
++            geo.loc.x -= gaps.1;
++            geo.size.w += gaps.1 * 2;
++            self.scroll_strip_to_show(geo);
++        }
++        true
++    }
++
+     pub fn stacking_indicator(&self) -> Option<Rectangle<i32, Local>> {
+         if let Some(TargetZone::WindowStack(_, geo)) =
+             self.last_overview_hover.as_ref().map(|(_, zone)| zone)
+@@ -2791,6 +3438,7 @@ impl TilingLayout {
                      &mut tree,
                      window.clone(),
                      &self.output,
@@ -899,7 +1017,7 @@ index 20e11b71..6554373b 100644
                      None,
                      None,
                      None,
-@@ -3000,7 +3568,7 @@ impl TilingLayout {
+@@ -3000,7 +3648,7 @@ impl TilingLayout {
          tree: &mut Tree<Data>,
          gaps: (i32, i32),
      ) -> Option<TilingBlocker> {
@@ -908,7 +1026,7 @@ index 20e11b71..6554373b 100644
              let mut configures = Vec::new();
  
              let (outer, inner) = gaps;
-@@ -3009,19 +3577,21 @@ impl TilingLayout {
+@@ -3009,19 +3657,21 @@ impl TilingLayout {
              geo.loc.y += outer;
              geo.size.w -= outer * 2;
              geo.size.h -= outer * 2;
@@ -933,7 +1051,7 @@ index 20e11b71..6554373b 100644
                      // RemoveBehavior::LiftChildren sadly does not what we want: lifting them into the same place.
                      // So we need to fix that manually..
                      let idx = node.parent().cloned().map(|parent_id| {
-@@ -3429,9 +3999,13 @@ impl TilingLayout {
+@@ -3429,9 +4079,13 @@ impl TilingLayout {
              overview.active_trigger(),
              Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
          ) {
@@ -950,7 +1068,7 @@ index 20e11b71..6554373b 100644
              let geometries = geometries_for_groupview(
                  tree,
                  Option::<&mut GlowRenderer>::None,
-@@ -4043,6 +4617,7 @@ impl TilingLayout {
+@@ -4043,6 +4697,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
@@ -958,7 +1076,7 @@ index 20e11b71..6554373b 100644
          let (target_tree, duration, _) = if self.queue.animation_start.is_some() {
              self.queue
                  .trees
-@@ -4209,6 +4784,7 @@ impl TilingLayout {
+@@ -4209,6 +4864,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
@@ -967,7 +1085,7 @@ index 20e11b71..6554373b 100644
              self.queue
                  .trees
 diff --git a/src/shell/mod.rs b/src/shell/mod.rs
-index 108307b1..ef2b13ef 100644
+index 108307b1..e09643ff 100644
 --- a/src/shell/mod.rs
 +++ b/src/shell/mod.rs
 @@ -1932,6 +1932,42 @@ impl Shell {
@@ -1057,3 +1175,29 @@ index 108307b1..ef2b13ef 100644
          {
              // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
              Some(KeyboardFocusTarget::from(mapped.clone()))
+@@ -4803,6 +4856,25 @@ impl Shell {
+         Some((grab, Focus::Clear))
+     }
+ 
++    /// Spalte des fokussierten Fensters im Scroll-Streifen breiter oder schmaler (Super +/-).
++    /// `false`, wenn kein gekacheltes Fenster im Streifen den Fokus hat.
++    pub fn resize_strip_column(&mut self, seat: &Seat<State>, grow: bool) -> bool {
++        let Some(output) = seat.focused_output() else {
++            return false;
++        };
++        let Some(focused) = seat.get_keyboard().unwrap().current_focus() else {
++            return false;
++        };
++        if matches!(focused, KeyboardFocusTarget::Fullscreen(_)) {
++            return false;
++        }
++        let (_, idx) = self.workspaces.active_num(&output);
++        let Some(workspace) = self.workspaces.get_mut(idx, &output) else {
++            return false;
++        };
++        workspace.tiling_layer.resize_strip_column(&focused, grow)
++    }
++
+     pub fn resize(&mut self, seat: &Seat<State>, direction: ResizeDirection, edge: ResizeEdge) {
+         let Some(output) = seat.focused_output() else {
+             return;
