@@ -193,10 +193,10 @@ index c6f202cf..3cbcecfb 100644
              } else {
                  return true;
 diff --git a/src/shell/layout/tiling/mod.rs b/src/shell/layout/tiling/mod.rs
-index 20e11b71..87a20306 100644
+index 20e11b71..6554373b 100644
 --- a/src/shell/layout/tiling/mod.rs
 +++ b/src/shell/layout/tiling/mod.rs
-@@ -84,6 +84,45 @@ pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+@@ -84,6 +84,69 @@ pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
  pub const MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(150);
  pub const INITIAL_MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(500);
  
@@ -211,6 +211,30 @@ index 20e11b71..87a20306 100644
 +const STRIP_SCROLL_DURATION: Duration = Duration::from_millis(260);
 +/// Ausgleiten nach dem Loslassen des Touchpads: Weg = Geschwindigkeit × diese Zeit (s).
 +const STRIP_FLING_TAU: f64 = 0.3;
++
++/// Wo eine neue Spalte in den Streifen kommt.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum StripPlacement {
++    /// rechts neben die Spalte des aktiven Fensters
++    AfterFocused,
++    /// ganz links
++    Start,
++    /// ganz rechts
++    End,
++}
++
++/// Apps, die bei mehreren Bildschirmen immer auf dem eingebauten erscheinen, und ihr Platz
++/// im Streifen: Todoist ganz links, kitty ganz rechts.
++pub fn builtin_app_placement(app_id: &str) -> Option<StripPlacement> {
++    let app_id = app_id.to_lowercase();
++    if app_id.contains("todoist") {
++        Some(StripPlacement::Start)
++    } else if app_id == "kitty" {
++        Some(StripPlacement::End)
++    } else {
++        None
++    }
++}
 +
 +/// Laufende weiche Bewegung des Ausschnitts, Versatz in Pixeln.
 +#[derive(Debug, Clone)]
@@ -242,7 +266,7 @@ index 20e11b71..87a20306 100644
  #[derive(Debug, Clone, PartialEq)]
  pub struct NodeDesc {
      pub handle: WorkspaceHandle,
-@@ -136,6 +175,9 @@ pub struct TilingLayout {
+@@ -136,6 +199,9 @@ pub struct TilingLayout {
      backdrop_id: Id,
      swapping_stack_surface_id: Id,
      last_overview_hover: Option<(Option<Instant>, TargetZone)>,
@@ -252,7 +276,7 @@ index 20e11b71..87a20306 100644
      pub theme: cosmic::Theme,
      pub appearance: AppearanceConfig,
  }
-@@ -281,6 +323,27 @@ impl Data {
+@@ -281,6 +347,27 @@ impl Data {
          }
      }
  
@@ -280,7 +304,7 @@ index 20e11b71..87a20306 100644
      fn geometry(&self) -> &Rectangle<i32, Local> {
          match self {
              Data::Group { last_geometry, .. } => last_geometry,
-@@ -367,6 +430,8 @@ impl TilingLayout {
+@@ -367,6 +454,8 @@ impl TilingLayout {
              backdrop_id: Id::new(),
              swapping_stack_surface_id: Id::new(),
              last_overview_hover: None,
@@ -289,7 +313,7 @@ index 20e11b71..87a20306 100644
              theme,
              appearance,
          }
-@@ -412,6 +477,7 @@ impl TilingLayout {
+@@ -412,6 +501,7 @@ impl TilingLayout {
          minimize_rect: Option<Rectangle<i32, Local>>,
      ) {
          let gaps = self.gaps();
@@ -297,16 +321,17 @@ index 20e11b71..87a20306 100644
  
          let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
          let last_active = focus_stack
-@@ -425,7 +491,7 @@ impl TilingLayout {
+@@ -425,14 +515,16 @@ impl TilingLayout {
  
          TilingLayout::map_to_tree(
              &mut tree,
 -            window,
 +            window.clone(),
              &self.output,
++            gaps.0,
              last_active,
              direction,
-@@ -433,6 +499,7 @@ impl TilingLayout {
+             minimize_rect,
          );
          let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
          self.queue.push_tree(tree, duration, blocker);
@@ -314,31 +339,90 @@ index 20e11b71..87a20306 100644
      }
  
      pub fn remap<'a>(
-@@ -581,6 +648,10 @@ impl TilingLayout {
+@@ -549,11 +641,28 @@ impl TilingLayout {
+         tree: &mut Tree<Data>,
+         window: impl Into<CosmicMapped>,
+         output: &Output,
++        outer: i32,
+         node: Option<NodeId>,
+         direction: Option<Direction>,
+         minimize_rect: Option<Rectangle<i32, Local>>,
+     ) {
+         let window = window.into();
++        // Scroll-Streifen: Auf einem externen Bildschirm kommt jedes neue Fenster mit einem
++        // Drittel der Breite ganz rechts dazu. Einzelne Apps haben einen festen Rand.
++        let external = !output.is_internal();
++        let zone = layer_map_for_output(output).non_exclusive_zone().as_local();
++        let viewport = Rectangle::<i32, Local>::new(
++            (zone.loc.x + outer, zone.loc.y + outer).into(),
++            (zone.size.w - outer * 2, zone.size.h - outer * 2).into(),
++        );
++        let column_w = (viewport.size.w / STRIP_COLUMNS_PER_SCREEN).max(360);
++        let placement = builtin_app_placement(&window.active_window().app_id()).unwrap_or(
++            if external {
++                StripPlacement::End
++            } else {
++                StripPlacement::AfterFocused
++            },
++        );
+         let new_window = Node::new(Data::Mapped {
+             mapped: window.clone(),
+             last_geometry: Rectangle::from_size((100, 100).into()),
+@@ -581,6 +690,37 @@ impl TilingLayout {
              } else {
                  tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
              }
 +        } else if tree.root_node_id().is_some() {
-+            // Scroll-Streifen: neue Fenster kommen als eigene Spalte rechts neben die aktive.
-+            let zone = layer_map_for_output(output).non_exclusive_zone();
-+            TilingLayout::append_to_strip(tree, new_window, node.as_ref(), zone.size.w, zone.loc.y)
++            // Scroll-Streifen: neue Fenster kommen als eigene Spalte dazu.
++            TilingLayout::append_to_strip(
++                tree,
++                new_window,
++                node.as_ref(),
++                placement,
++                external,
++                viewport.size.w,
++                column_w,
++            )
++        } else if external {
++            // erstes Fenster auf dem externen Bildschirm: Streifen mit einer Spalte von einem
++            // Drittel der Breite, links bündig
++            let root_id = tree
++                .insert(
++                    Node::new(Data::Group {
++                        orientation: Orientation::Vertical,
++                        sizes: vec![column_w],
++                        last_geometry: Rectangle::new(
++                            viewport.loc,
++                            (column_w, viewport.size.h).into(),
++                        ),
++                        alive: Arc::new(()),
++                        pill_indicator: None,
++                    }),
++                    InsertBehavior::AsRoot,
++                )
++                .unwrap();
++            tree.insert(new_window, InsertBehavior::UnderNode(&root_id))
++                .unwrap()
          } else if let Some(ref node_id) = node {
              let orientation = {
                  let window_size = tree.get(node_id).unwrap().data().geometry().size;
-@@ -615,6 +686,389 @@ impl TilingLayout {
+@@ -615,6 +755,397 @@ impl TilingLayout {
          *window.tiling_node_id.lock().unwrap() = Some(window_id);
      }
  
-+    /// Hängt ein neues Fenster als Spalte rechts neben die Spalte von `focused` an.
-+    /// Solange der Streifen nicht breiter als der Bildschirm ist und höchstens
++    /// Hängt ein neues Fenster als Spalte an den Streifen, an der Stelle `placement`.
++    /// Auf einem externen Bildschirm (`external`) bekommt sie immer ein Drittel der Breite.
++    /// Sonst gilt: Solange der Streifen nicht breiter als der Bildschirm ist und höchstens
 +    /// `STRIP_COLUMNS_PER_SCREEN` Spalten entstehen, teilen sie sich den Bildschirm gleichmäßig;
-+    /// danach bekommt die neue Spalte ein Drittel der Bildschirmbreite und der Streifen wächst.
++    /// eine Lücke füllt die neue Spalte; danach bekommt sie ein Drittel und der Streifen wächst.
 +    fn append_to_strip(
 +        tree: &mut Tree<Data>,
 +        new_window: Node<Data>,
 +        focused: Option<&NodeId>,
-+        zone_w: i32,
-+        zone_y: i32,
++        placement: StripPlacement,
++        external: bool,
++        viewport_w: i32,
++        column_w: i32,
 +    ) -> NodeId {
 +        let root_id = tree.root_node_id().cloned().unwrap();
 +
@@ -346,12 +430,20 @@ index 20e11b71..87a20306 100644
 +            // noch kein Streifen: alte Wurzel und neues Fenster nebeneinander
 +            let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
 +            TilingLayout::new_group(tree, &root_id, &new_id, Orientation::Vertical).unwrap();
++            if placement == StripPlacement::Start {
++                tree.make_nth_sibling(&new_id, 0).unwrap();
++            }
 +            return new_id;
 +        }
 +
 +        // die Spalte (direktes Kind der Wurzel), in der das aktive Fenster steckt
 +        let count = tree.children_ids(&root_id).unwrap().count();
-+        let idx = focused
++        let idx = match placement {
++            StripPlacement::Start => Some(0),
++            StripPlacement::End => Some(count),
++            StripPlacement::AfterFocused => None,
++        };
++        let idx = idx.or_else(|| focused
 +            .filter(|id| tree.get(id).is_ok())
 +            .and_then(|id| {
 +                let mut column = id.clone();
@@ -365,19 +457,16 @@ index 20e11b71..87a20306 100644
 +                    .unwrap()
 +                    .position(|child| child == &column)
 +            })
-+            .map(|pos| pos + 1)
++            .map(|pos| pos + 1))
 +            .unwrap_or(count);
 +
-+        let column_w = (zone_w / STRIP_COLUMNS_PER_SCREEN).max(360);
 +        let data = tree.get_mut(&root_id).unwrap().data_mut();
-+        // Breite der sichtbaren Fläche: Zone abzüglich der äußeren Abstände. Die Wurzel liegt
-+        // senkrecht nie verschoben, ihr oberer Abstand ist darum der äußere Abstand.
-+        let outer = (data.geometry().loc.y - zone_y).max(0);
-+        let viewport_w = zone_w - outer * 2;
 +        if let Data::Group { sizes, .. } = data {
 +            let used: i32 = sizes.iter().sum();
 +            let free = viewport_w - used;
-+            if free <= 0 && (count as i32) < STRIP_COLUMNS_PER_SCREEN {
++            if external {
++                sizes.insert(idx, column_w);
++            } else if free <= 0 && (count as i32) < STRIP_COLUMNS_PER_SCREEN {
 +                // Streifen füllt genau den Bildschirm: gleichmäßig neu aufteilen
 +                data.add_window(idx);
 +            } else if free >= column_w.min(viewport_w / 2) {
@@ -715,7 +804,7 @@ index 20e11b71..87a20306 100644
      pub fn replace_window(&mut self, old: &CosmicMapped, new: &CosmicMapped) {
          let gaps = self.gaps();
          let Some(old_id) = old.tiling_node_id.lock().unwrap().clone() else {
-@@ -1326,7 +1780,8 @@ impl TilingLayout {
+@@ -1326,7 +1857,8 @@ impl TilingLayout {
                      orientation, sizes, ..
                  } = parent.data()
                  {
@@ -725,7 +814,7 @@ index 20e11b71..87a20306 100644
                          // this group will be flattened
                          Some(RestoreTilingState {
                              parent: None,
-@@ -1467,7 +1922,14 @@ impl TilingLayout {
+@@ -1467,7 +1999,14 @@ impl TilingLayout {
              let group = tree.get_mut(&id).unwrap().data_mut();
              assert!(group.is_group());
  
@@ -741,7 +830,15 @@ index 20e11b71..87a20306 100644
                  group.remove_window(position);
              } else {
                  trace!("Removing Group");
-@@ -2357,10 +2819,11 @@ impl TilingLayout {
+@@ -2201,6 +2740,7 @@ impl TilingLayout {
+                     &mut tree,
+                     window.clone(),
+                     &self.output,
++                    self.gaps().0,
+                     Some(current_node),
+                     None,
+                     None,
+@@ -2357,10 +2897,11 @@ impl TilingLayout {
      }
  
      pub fn animations_going(&self) -> bool {
@@ -754,7 +851,7 @@ index 20e11b71..87a20306 100644
          let mut clients = HashMap::new();
          let mut ready_trees = 0;
          for (_, _, blocker) in self.queue.trees.iter().skip(1) {
-@@ -2496,6 +2959,13 @@ impl TilingLayout {
+@@ -2496,6 +3037,13 @@ impl TilingLayout {
                  if node_idx < total - 1 && edge.contains(ResizeEdge::RIGHT) {
                      return Some((group_id, node_idx, orientation));
                  }
@@ -768,7 +865,7 @@ index 20e11b71..87a20306 100644
              } else {
                  if node_idx > 0 && edge.contains(ResizeEdge::TOP) {
                      return Some((group_id, node_idx - 1, orientation));
-@@ -2565,6 +3035,25 @@ impl TilingLayout {
+@@ -2565,6 +3113,25 @@ impl TilingLayout {
                      }
                  }
              }) else {
@@ -794,7 +891,15 @@ index 20e11b71..87a20306 100644
                  node_id = group_id.clone();
                  continue;
              };
-@@ -3000,7 +3489,7 @@ impl TilingLayout {
+@@ -2791,6 +3358,7 @@ impl TilingLayout {
+                     &mut tree,
+                     window.clone(),
+                     &self.output,
++                    self.gaps().0,
+                     None,
+                     None,
+                     None,
+@@ -3000,7 +3568,7 @@ impl TilingLayout {
          tree: &mut Tree<Data>,
          gaps: (i32, i32),
      ) -> Option<TilingBlocker> {
@@ -803,7 +908,7 @@ index 20e11b71..87a20306 100644
              let mut configures = Vec::new();
  
              let (outer, inner) = gaps;
-@@ -3009,19 +3498,21 @@ impl TilingLayout {
+@@ -3009,19 +3577,21 @@ impl TilingLayout {
              geo.loc.y += outer;
              geo.size.w -= outer * 2;
              geo.size.h -= outer * 2;
@@ -828,7 +933,7 @@ index 20e11b71..87a20306 100644
                      // RemoveBehavior::LiftChildren sadly does not what we want: lifting them into the same place.
                      // So we need to fix that manually..
                      let idx = node.parent().cloned().map(|parent_id| {
-@@ -3429,9 +3920,13 @@ impl TilingLayout {
+@@ -3429,9 +3999,13 @@ impl TilingLayout {
              overview.active_trigger(),
              Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
          ) {
@@ -845,7 +950,7 @@ index 20e11b71..87a20306 100644
              let geometries = geometries_for_groupview(
                  tree,
                  Option::<&mut GlowRenderer>::None,
-@@ -4043,6 +4538,7 @@ impl TilingLayout {
+@@ -4043,6 +4617,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
@@ -853,7 +958,7 @@ index 20e11b71..87a20306 100644
          let (target_tree, duration, _) = if self.queue.animation_start.is_some() {
              self.queue
                  .trees
-@@ -4209,6 +4705,7 @@ impl TilingLayout {
+@@ -4209,6 +4784,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
@@ -862,7 +967,7 @@ index 20e11b71..87a20306 100644
              self.queue
                  .trees
 diff --git a/src/shell/mod.rs b/src/shell/mod.rs
-index 108307b1..9077300a 100644
+index 108307b1..ef2b13ef 100644
 --- a/src/shell/mod.rs
 +++ b/src/shell/mod.rs
 @@ -1932,6 +1932,42 @@ impl Shell {
@@ -908,3 +1013,47 @@ index 108307b1..9077300a 100644
      /// get the parent output of the window which has keyboard focus (for a given seat)
      pub fn get_output_for_focus(&self, seat: &Seat<State>) -> Option<Output> {
          let mut focus_target = seat.get_keyboard().unwrap().current_focus()?;
+@@ -3038,14 +3074,30 @@ impl Shell {
+                 Some((handle, parent_output, anchor))
+             });
+ 
++        let mut to_builtin = false;
+         let (workspace_handle, mut output, parent_geometry) = match parent_placement {
+             Some(placement) => placement,
+             None => {
+-                let handle = match pending_activation {
+-                    Some(ActivationContext::Workspace(handle)) => Some(handle),
+-                    _ => None,
+-                };
+-                (handle, output.unwrap_or_else(|| seat.active_output()), None)
++                // Scroll-Streifen: Todoist und kitty erscheinen bei mehreren Bildschirmen immer
++                // auf dem eingebauten (aktive Arbeitsfläche dort).
++                let builtin = (output.is_none()
++                    && self.outputs().count() >= 2
++                    && layout::tiling::builtin_app_placement(&window.app_id()).is_some())
++                .then(|| self.builtin_output().cloned())
++                .flatten();
++                match builtin {
++                    Some(builtin) => {
++                        to_builtin = true;
++                        (None, builtin, None)
++                    }
++                    None => {
++                        let handle = match pending_activation {
++                            Some(ActivationContext::Workspace(handle)) => Some(handle),
++                            _ => None,
++                        };
++                        (handle, output.unwrap_or_else(|| seat.active_output()), None)
++                    }
++                }
+             }
+         };
+ 
+@@ -3172,6 +3224,7 @@ impl Shell {
+             None
+         } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)
+             || should_be_sticky
++            || to_builtin
+         {
+             // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
+             Some(KeyboardFocusTarget::from(mapped.clone()))
