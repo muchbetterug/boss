@@ -44,10 +44,13 @@ COSMIC_PKGS=(
   cosmic-wallpapers # nur "Recommends", wird mit install_weak_deps=False sonst weggelassen
   cosmic-player # liefert com.system76.CosmicPlayer.desktop; cosmic-mimeapps.list aus
                 # cosmic-session zeigt alle video/*-Typen darauf, ohne das Paket zu ziehen
+  cosmic-monitor # Systemmonitor; nicht Teil von cosmic-session
   xdg-desktop-portal-cosmic
 )
 
-# Weitere COSMIC-Apps nach Geschmack: cosmic-monitor
+# Damit sind alle COSMIC-Apps aus den Fedora-Repos drin (Stand Fedora 44). Bewusst nicht:
+# cutecosmic-qt6 (Qt-Plattform-Plugin, keine App) und die fedora-release-cosmic*-Pakete
+# (Identität des COSMIC-Spins, würde mit Bluefin streiten).
 
 # Zweite Session: niri (scrollendes Tiling wie PaperWM) mit Noctalia als Shell.
 # niri bringt /usr/share/wayland-sessions/niri.desktop mit und taucht damit von selbst
