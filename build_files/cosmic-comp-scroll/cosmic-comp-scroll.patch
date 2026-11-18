@@ -224,10 +224,10 @@ index c6f202cf..3cbcecfb 100644
              } else {
                  return true;
 diff --git a/src/shell/layout/tiling/mod.rs b/src/shell/layout/tiling/mod.rs
-index 20e11b71..89b1dd93 100644
+index 20e11b71..69625a13 100644
 --- a/src/shell/layout/tiling/mod.rs
 +++ b/src/shell/layout/tiling/mod.rs
-@@ -84,6 +84,97 @@ pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+@@ -84,6 +84,99 @@ pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
  pub const MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(150);
  pub const INITIAL_MOUSE_ANIMATION_DELAY: Duration = Duration::from_millis(500);
  
@@ -240,6 +240,8 @@ index 20e11b71..89b1dd93 100644
 +pub const STRIP_COLUMNS_PER_SCREEN: i32 = 3;
 +/// Dauer eines weichen Scrollschritts (Mausrad, Mitscrollen zum Fenster).
 +const STRIP_SCROLL_DURATION: Duration = Duration::from_millis(260);
++/// Dauer der Fahrt zur Mitte (Klick aufs Panel-Symbol); der Weg ist oft länger.
++const STRIP_CENTER_DURATION: Duration = Duration::from_millis(420);
 +/// Ausgleiten nach dem Loslassen des Touchpads: Weg = Geschwindigkeit × diese Zeit (s).
 +const STRIP_FLING_TAU: f64 = 0.3;
 +
@@ -325,7 +327,7 @@ index 20e11b71..89b1dd93 100644
  #[derive(Debug, Clone, PartialEq)]
  pub struct NodeDesc {
      pub handle: WorkspaceHandle,
-@@ -136,6 +227,9 @@ pub struct TilingLayout {
+@@ -136,6 +229,9 @@ pub struct TilingLayout {
      backdrop_id: Id,
      swapping_stack_surface_id: Id,
      last_overview_hover: Option<(Option<Instant>, TargetZone)>,
@@ -335,7 +337,7 @@ index 20e11b71..89b1dd93 100644
      pub theme: cosmic::Theme,
      pub appearance: AppearanceConfig,
  }
-@@ -281,6 +375,27 @@ impl Data {
+@@ -281,6 +377,27 @@ impl Data {
          }
      }
  
@@ -363,7 +365,7 @@ index 20e11b71..89b1dd93 100644
      fn geometry(&self) -> &Rectangle<i32, Local> {
          match self {
              Data::Group { last_geometry, .. } => last_geometry,
-@@ -367,6 +482,8 @@ impl TilingLayout {
+@@ -367,6 +484,8 @@ impl TilingLayout {
              backdrop_id: Id::new(),
              swapping_stack_surface_id: Id::new(),
              last_overview_hover: None,
@@ -372,7 +374,7 @@ index 20e11b71..89b1dd93 100644
              theme,
              appearance,
          }
-@@ -412,6 +529,7 @@ impl TilingLayout {
+@@ -412,6 +531,7 @@ impl TilingLayout {
          minimize_rect: Option<Rectangle<i32, Local>>,
      ) {
          let gaps = self.gaps();
@@ -380,7 +382,7 @@ index 20e11b71..89b1dd93 100644
  
          let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
          let last_active = focus_stack
-@@ -425,14 +543,16 @@ impl TilingLayout {
+@@ -425,14 +545,16 @@ impl TilingLayout {
  
          TilingLayout::map_to_tree(
              &mut tree,
@@ -398,7 +400,7 @@ index 20e11b71..89b1dd93 100644
      }
  
      pub fn remap<'a>(
-@@ -549,11 +669,30 @@ impl TilingLayout {
+@@ -549,11 +671,30 @@ impl TilingLayout {
          tree: &mut Tree<Data>,
          window: impl Into<CosmicMapped>,
          output: &Output,
@@ -429,7 +431,7 @@ index 20e11b71..89b1dd93 100644
          let new_window = Node::new(Data::Mapped {
              mapped: window.clone(),
              last_geometry: Rectangle::from_size((100, 100).into()),
-@@ -581,6 +720,37 @@ impl TilingLayout {
+@@ -581,6 +722,37 @@ impl TilingLayout {
              } else {
                  tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
              }
@@ -467,7 +469,7 @@ index 20e11b71..89b1dd93 100644
          } else if let Some(ref node_id) = node {
              let orientation = {
                  let window_size = tree.get(node_id).unwrap().data().geometry().size;
-@@ -615,6 +785,415 @@ impl TilingLayout {
+@@ -615,6 +787,426 @@ impl TilingLayout {
          *window.tiling_node_id.lock().unwrap() = Some(window_id);
      }
  
@@ -833,6 +835,17 @@ index 20e11b71..89b1dd93 100644
 +        self.scroll_strip_to_show(geo)
 +    }
 +
++    /// Scrollt weich, bis `mapped` mittig im Ausschnitt steht (so weit der Streifen reicht).
++    pub fn scroll_strip_to_center(&mut self, mapped: &CosmicMapped) -> bool {
++        let Some(geo) = self.element_geometry(mapped) else {
++            return false;
++        };
++        let viewport = self.strip_viewport();
++        let dx = (geo.loc.x + geo.size.w / 2) - (viewport.loc.x + viewport.size.w / 2);
++        dx != 0
++            && self.animate_strip(None, dx as f64, STRIP_CENTER_DURATION, StripEasing::Gentle)
++    }
++
 +    /// Hält den rechten Rand des Streifens sichtbar (beim Verbreitern am Außenrand). Sofort,
 +    /// nicht weich: das Ziehen setzt bei jeder Bewegung neu auf den Baum vom Griffbeginn auf.
 +    pub fn scroll_strip_to_end(&mut self) -> bool {
@@ -883,7 +896,7 @@ index 20e11b71..89b1dd93 100644
      pub fn replace_window(&mut self, old: &CosmicMapped, new: &CosmicMapped) {
          let gaps = self.gaps();
          let Some(old_id) = old.tiling_node_id.lock().unwrap().clone() else {
-@@ -1326,7 +1905,8 @@ impl TilingLayout {
+@@ -1326,7 +1918,8 @@ impl TilingLayout {
                      orientation, sizes, ..
                  } = parent.data()
                  {
@@ -893,7 +906,7 @@ index 20e11b71..89b1dd93 100644
                          // this group will be flattened
                          Some(RestoreTilingState {
                              parent: None,
-@@ -1467,7 +2047,14 @@ impl TilingLayout {
+@@ -1467,7 +2060,14 @@ impl TilingLayout {
              let group = tree.get_mut(&id).unwrap().data_mut();
              assert!(group.is_group());
  
@@ -909,7 +922,7 @@ index 20e11b71..89b1dd93 100644
                  group.remove_window(position);
              } else {
                  trace!("Removing Group");
-@@ -2201,6 +2788,7 @@ impl TilingLayout {
+@@ -2201,6 +2801,7 @@ impl TilingLayout {
                      &mut tree,
                      window.clone(),
                      &self.output,
@@ -917,7 +930,7 @@ index 20e11b71..89b1dd93 100644
                      Some(current_node),
                      None,
                      None,
-@@ -2357,10 +2945,11 @@ impl TilingLayout {
+@@ -2357,10 +2958,11 @@ impl TilingLayout {
      }
  
      pub fn animations_going(&self) -> bool {
@@ -930,7 +943,7 @@ index 20e11b71..89b1dd93 100644
          let mut clients = HashMap::new();
          let mut ready_trees = 0;
          for (_, _, blocker) in self.queue.trees.iter().skip(1) {
-@@ -2496,6 +3085,13 @@ impl TilingLayout {
+@@ -2496,6 +3098,13 @@ impl TilingLayout {
                  if node_idx < total - 1 && edge.contains(ResizeEdge::RIGHT) {
                      return Some((group_id, node_idx, orientation));
                  }
@@ -944,7 +957,7 @@ index 20e11b71..89b1dd93 100644
              } else {
                  if node_idx > 0 && edge.contains(ResizeEdge::TOP) {
                      return Some((group_id, node_idx - 1, orientation));
-@@ -2565,6 +3161,25 @@ impl TilingLayout {
+@@ -2565,6 +3174,25 @@ impl TilingLayout {
                      }
                  }
              }) else {
@@ -970,7 +983,7 @@ index 20e11b71..89b1dd93 100644
                  node_id = group_id.clone();
                  continue;
              };
-@@ -2619,6 +3234,86 @@ impl TilingLayout {
+@@ -2619,6 +3247,86 @@ impl TilingLayout {
          true
      }
  
@@ -1057,7 +1070,7 @@ index 20e11b71..89b1dd93 100644
      pub fn stacking_indicator(&self) -> Option<Rectangle<i32, Local>> {
          if let Some(TargetZone::WindowStack(_, geo)) =
              self.last_overview_hover.as_ref().map(|(_, zone)| zone)
-@@ -2791,6 +3486,7 @@ impl TilingLayout {
+@@ -2791,6 +3499,7 @@ impl TilingLayout {
                      &mut tree,
                      window.clone(),
                      &self.output,
@@ -1065,7 +1078,7 @@ index 20e11b71..89b1dd93 100644
                      None,
                      None,
                      None,
-@@ -3000,7 +3696,7 @@ impl TilingLayout {
+@@ -3000,7 +3709,7 @@ impl TilingLayout {
          tree: &mut Tree<Data>,
          gaps: (i32, i32),
      ) -> Option<TilingBlocker> {
@@ -1074,7 +1087,7 @@ index 20e11b71..89b1dd93 100644
              let mut configures = Vec::new();
  
              let (outer, inner) = gaps;
-@@ -3009,19 +3705,21 @@ impl TilingLayout {
+@@ -3009,19 +3718,21 @@ impl TilingLayout {
              geo.loc.y += outer;
              geo.size.w -= outer * 2;
              geo.size.h -= outer * 2;
@@ -1099,7 +1112,7 @@ index 20e11b71..89b1dd93 100644
                      // RemoveBehavior::LiftChildren sadly does not what we want: lifting them into the same place.
                      // So we need to fix that manually..
                      let idx = node.parent().cloned().map(|parent_id| {
-@@ -3429,9 +4127,13 @@ impl TilingLayout {
+@@ -3429,9 +4140,13 @@ impl TilingLayout {
              overview.active_trigger(),
              Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
          ) {
@@ -1116,7 +1129,7 @@ index 20e11b71..89b1dd93 100644
              let geometries = geometries_for_groupview(
                  tree,
                  Option::<&mut GlowRenderer>::None,
-@@ -4043,6 +4745,7 @@ impl TilingLayout {
+@@ -4043,6 +4758,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
@@ -1124,7 +1137,7 @@ index 20e11b71..89b1dd93 100644
          let (target_tree, duration, _) = if self.queue.animation_start.is_some() {
              self.queue
                  .trees
-@@ -4209,6 +4912,7 @@ impl TilingLayout {
+@@ -4209,6 +4925,7 @@ impl TilingLayout {
      {
          let output_scale = self.output.current_scale().fractional_scale();
  
@@ -1133,10 +1146,10 @@ index 20e11b71..89b1dd93 100644
              self.queue
                  .trees
 diff --git a/src/shell/mod.rs b/src/shell/mod.rs
-index 108307b1..270ab68b 100644
+index 108307b1..abf33b94 100644
 --- a/src/shell/mod.rs
 +++ b/src/shell/mod.rs
-@@ -1932,6 +1932,42 @@ impl Shell {
+@@ -1932,6 +1932,56 @@ impl Shell {
          self.workspaces.active_mut(output)
      }
  
@@ -1176,10 +1189,24 @@ index 108307b1..270ab68b 100644
 +        }
 +    }
 +
++    /// Scroll-Streifen nach Klick aufs Panel-Symbol: auf externen Bildschirmen das Fenster in
++    /// die Mitte holen, außer kitty und Todoist; sonst nur so weit, dass es ganz sichtbar ist.
++    pub fn scroll_strip_to_activated(&mut self, mapped: &CosmicMapped, output: &Output) {
++        let center = !output.is_internal()
++            && layout::tiling::builtin_app_placement(&mapped.active_window().app_id()).is_none();
++        if let Some(ws) = self.space_for_mut(mapped) {
++            if center {
++                ws.tiling_layer.scroll_strip_to_center(mapped);
++            } else {
++                ws.tiling_layer.scroll_strip_to_window(mapped);
++            }
++        }
++    }
++
      /// get the parent output of the window which has keyboard focus (for a given seat)
      pub fn get_output_for_focus(&self, seat: &Seat<State>) -> Option<Output> {
          let mut focus_target = seat.get_keyboard().unwrap().current_focus()?;
-@@ -3038,14 +3074,41 @@ impl Shell {
+@@ -3038,14 +3088,41 @@ impl Shell {
                  Some((handle, parent_output, anchor))
              });
  
@@ -1226,7 +1253,7 @@ index 108307b1..270ab68b 100644
              }
          };
  
-@@ -3172,6 +3235,7 @@ impl Shell {
+@@ -3172,6 +3249,7 @@ impl Shell {
              None
          } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)
              || should_be_sticky
@@ -1234,7 +1261,7 @@ index 108307b1..270ab68b 100644
          {
              // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
              Some(KeyboardFocusTarget::from(mapped.clone()))
-@@ -4803,6 +4867,25 @@ impl Shell {
+@@ -4803,6 +4881,25 @@ impl Shell {
          Some((grab, Focus::Clear))
      }
  
@@ -1260,3 +1287,20 @@ index 108307b1..270ab68b 100644
      pub fn resize(&mut self, seat: &Seat<State>, direction: ResizeDirection, edge: ResizeEdge) {
          let Some(output) = seat.focused_output() else {
              return;
+diff --git a/src/wayland/handlers/toplevel_management.rs b/src/wayland/handlers/toplevel_management.rs
+index 91e22a47..a69fdbe6 100644
+--- a/src/wayland/handlers/toplevel_management.rs
++++ b/src/wayland/handlers/toplevel_management.rs
+@@ -135,6 +135,12 @@ impl ToplevelManagementHandler for State {
+             }
+ 
+             Shell::set_focus(self, Some(&target), &seat, None, false);
++            if let KeyboardFocusTarget::Element(mapped) = &target {
++                self.common
++                    .shell
++                    .write()
++                    .scroll_strip_to_activated(mapped, output);
++            }
+             return;
+         }
+     }
