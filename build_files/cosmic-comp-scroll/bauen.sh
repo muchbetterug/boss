@@ -17,6 +17,13 @@ here="$(dirname "$(readlink -f "$0")")"
 top=/tmp/rpmbuild
 mkdir -p /out
 
+# Im bootc-Basis-Image ist /root ein Verweis auf /var/roothome, und das Ziel fehlt beim
+# Bauen. cargo scheitert dann an /root/.cargo mit "File exists (os error 17)". Nur diese
+# Baustufe ist betroffen, ins fertige Image kommt davon nichts.
+if [[ -L /root && ! -e /root ]]; then
+    mkdir -p "$(readlink -f /root)"
+fi
+
 fail() {
     echo "FEHLER: $*" | tee /out/STATUS
     exit 0
