@@ -1,3 +1,7 @@
+# Basis-Image, unten erklärt. Steht hier oben, weil auch die Baustufe für cosmic-comp
+# darauf aufsetzt.
+ARG BASE_IMAGE=ghcr.io/ublue-os/bluefin-nvidia-open:stable
+
 # Allow build scripts to be referenced without being copied into the final image
 FROM scratch AS ctx
 COPY build_files /
@@ -5,8 +9,10 @@ COPY build_files /
 # cosmic-comp mit Scroll-Streifen: frei waagerecht scrollbare Kachel-Arbeitsfläche.
 # Baut Fedoras aktuelles cosmic-comp-Quellpaket mit build_files/cosmic-comp-scroll/*.patch.
 # Bricht den Image-Bau nie ab; passt der Patch nicht, bleibt unten das Original
-# (siehe einspielen.sh). Die Fedora-Version muss zur Basis passen.
-FROM registry.fedoraproject.org/fedora:44 AS cosmic-comp-scroll
+# (siehe einspielen.sh). Die Stufe baut auf dem Basis-Image selbst, damit die
+# Fedora-Version immer zu ihm passt: mit festem fedora:44 lief der Patch ab dem
+# Sprung der Basis auf Fedora 45 (Image vom 20.11.2026) ins Leere.
+FROM ${BASE_IMAGE} AS cosmic-comp-scroll
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/cache/libdnf5 \
     /ctx/cosmic-comp-scroll/bauen.sh
@@ -18,7 +24,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
 # nach. Gepflegt wird wieder unter ublue-os, und die proprietäre Variante
 # ghcr.io/ublue-os/bluefin-nvidia endete mit Fedora 42 -> übrig bleibt nvidia-open.
 # Das ist für Turing und neuer der empfohlene Treiber, die RTX 4070 (Ada) fällt darunter.
-FROM ghcr.io/ublue-os/bluefin-nvidia-open:stable
+FROM ${BASE_IMAGE}
 #FROM ghcr.io/ublue-os/bluefin-nvidia-open:stable-daily # täglich statt wochenweise gated
 #FROM ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable    # dasselbe als Developer-Variante
 #FROM ghcr.io/ublue-os/bazzite:stable

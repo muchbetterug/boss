@@ -127,6 +127,17 @@ systemctl --force enable gdm.service
 log "Enable cosmic-greeter-daemon (needed by the COSMIC lock screen)..."
 systemctl enable cosmic-greeter-daemon.service
 
+# Schlüsselbund: Fedora 45 ersetzt gnome-keyring durch oo7. Das Paket oo7-daemon bringt
+# keine D-Bus-Aktivierungsdatei mit, nur die Benutzer-Unit (WantedBy=default.target), und
+# die steht im Preset auf "disabled". Ohne diese Zeile startet niemand den Dienst: pam_oo7
+# reicht das Login-Passwort weiter, oo7-daemon-login wartet 120 s und gibt auf, und
+# Programme wie gh oder git-credential-libsecret finden keinen Secret Service. Beim
+# ersten Start übernimmt oo7 ~/.local/share/keyrings/login.keyring mit dem Login-Passwort.
+if [[ -f /usr/lib/systemd/user/oo7-daemon.service ]]; then
+  log "Enable oo7-daemon (Secret Service) for all users..."
+  systemctl --global enable oo7-daemon.service
+fi
+
 # Sanity-Check: ohne diese Datei taucht COSMIC in der GDM-Sessionauswahl nicht auf.
 log "Verify wayland sessions are present..."
 test -f /usr/share/wayland-sessions/cosmic.desktop
